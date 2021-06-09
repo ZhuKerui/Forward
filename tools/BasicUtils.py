@@ -4,6 +4,7 @@ from heapq import nlargest
 import multiprocessing
 from threading import Thread
 from math import ceil
+import subprocess
 
 
 def ugly_normalize(vecs:np.ndarray):
@@ -85,3 +86,7 @@ class MultiThreading:
             threads[i].join()
         sub_result = ['\n'.join(sub) for sub in result]
         return '\n'.join(sub_result)
+
+def my_email(title:str, message:str, email:str):
+    cmd = 'echo "%s" | mail -s "%s" %s' % (message, title, email)
+    subprocess.Popen(cmd, shell=True)

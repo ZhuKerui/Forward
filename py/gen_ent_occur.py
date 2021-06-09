@@ -1,4 +1,4 @@
-# python gen_ent_occur.py entity_file sentence_file occur_file
+# python gen_ent_occur.py entity_file idx_sentence_file occur_file
 import sys
 
 sys.path.append('..')

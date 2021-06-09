@@ -1,4 +1,4 @@
-# python gen_occur.py wordtree_file keyword_file sentence_file occur_file
+# python gen_occur.py wordtree_file keyword_file idx_sentence_file occur_file
 import sys
 
 sys.path.append('..')
