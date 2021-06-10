@@ -1,4 +1,3 @@
-from numpy.lib.function_base import append
 from tools.TextProcessing import nlp, find_dependency_path_from_tree
 from typing import List
 import pandas as pd
