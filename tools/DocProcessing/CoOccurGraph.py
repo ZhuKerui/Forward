@@ -34,5 +34,5 @@ def graph_dump(g:nx.Graph, gpickle_file:str):
 def graph_load(gpickle_file:str):
     return nx.read_gpickle(gpickle_file)
 
-def get_subgraph(g:nx.Graph, npmi_threshold:float, min_count:int):
-    return g.edge_subgraph([e[0] for e in g.edges.items() if e[1]['npmi'] > npmi_threshold and e[1]['c'] >= min_count])
+def get_subgraph(g:nx.Graph, npmi_min:float, min_count:int, npmi_max:float=1.0):
+    return g.edge_subgraph([e[0] for e in g.edges.items() if e[1]['npmi'] > npmi_min and e[1]['c'] >= min_count and e[1]['npmi'] < npmi_max])

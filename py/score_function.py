@@ -1,6 +1,3 @@
-# 要添加一个新单元，输入 '# %%'
-# 要添加一个新的标记单元，输入 '# %% [markdown]'
-# %%
 import pandas as pd
 import random
 from collections import Counter
@@ -11,60 +8,42 @@ import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.optim as optim
 from tqdm import tqdm
+import os
 
 import sys
 sys.path.append('..')
 from tools.Models import save_model, rescale_gradients, ScoreFunctionModel_1, ScoreFunctionModel_2
+from tools.TextProcessing import nlp, find_dependency_path_from_tree
 
-
-# %%
 # Some constants
 max_path_len = 10
 embed_dim = 512
-dataset_file = '../data/corpus/score_func_dataset.csv'
+dataset_file = '../data/corpus/pos_dataset.csv'
 train_file = '../data/temp/train.csv'
 valid_file = '../data/temp/valid.csv'
 epochs = 6
 lr = 0.01
 grad_norm = 10
 dev_every = 5000
-save_path = '../data/output/score_func/save_path_1'
+save_path = '../data/output/score_func/model_2'
 
-
-# %%
 # Load positive examples
 df_pos = pd.read_csv(dataset_file)
 df_pos['label'] = 'T'
 
-
-# %%
-# Create negative examples for model 1
-def gen_neg_path(path:str):
-    items = path.split()
-    if len(items) < 2 or len(set(items)) == 1:
-        return ''
-    shuffled_list = random.sample(items, len(items))
-    while shuffled_list == items:
-        shuffled_list = random.sample(items, len(items))
-    return ' '.join(shuffled_list)
-
-df_neg = df_pos.copy()
-df_neg['path'] = df_neg.apply(lambda row: gen_neg_path(row['path']), axis=1)
-df_neg = df_neg[df_neg['path'] != '']
-df_neg['label'] = 'F'
-
-
-# %%
-# Create negative examples for model 2
-# df_neg = pd.concat([df_pos.path.to_frame(), 
-#                     df_pos.subj.sample(frac=1).reset_index(drop=True).to_frame(), 
-#                     df_pos.obj.sample(frac=1).reset_index(drop=True).to_frame()], axis=1)
-# df_neg['label'] = 'F'
-
-
-# %%
 # Split the dataset into training and validation dataset
+
+# # pos_only
+# df = df_pos
+
+# model_2
+# Create negative examples for model 2
+df_neg = pd.concat([df_pos.path.to_frame(), 
+                    df_pos.subj.to_frame(), 
+                    df_pos.obj.sample(frac=1).reset_index(drop=True).to_frame()], axis=1)
+df_neg['label'] = 'F'
 df = pd.concat([df_pos, df_neg], ignore_index=True)
+
 df = df.sample(frac=1).reset_index(drop=True)
 total_num = len(df)
 train_df = df[:int(total_num*0.8)]
@@ -72,14 +51,10 @@ valid_df = df[int(total_num*0.8):]
 train_df.to_csv(train_file, index=False)
 valid_df.to_csv(valid_file, index=False)
 
-
-# %%
 # Load training and validation dataset
 train_df = pd.read_csv(train_file)
 valid_df = pd.read_csv(valid_file)
 
-
-# %%
 # Generate Vocabularies
 path_tokenizer = lambda x: x.split()
 
@@ -93,8 +68,6 @@ entity_c.update(train_df['subj'].values.tolist())
 entity_c.update(train_df['obj'].values.tolist())
 entity_vocab = Vocab(entity_c)
 
-
-# %%
 # Define and generate training and validation dataset
 class MyDataset(Dataset):
     def __init__(self, corpus_file):
@@ -109,8 +82,6 @@ class MyDataset(Dataset):
 train_dataset = MyDataset(train_file)
 valid_dataset = MyDataset(valid_file)
 
-
-# %%
 # Define and generate dataloader
 def collate_batch(batch):
    path_list, subj_list, obj_list, label_list = [], [], [], []
@@ -124,8 +95,6 @@ def collate_batch(batch):
 train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_batch)
 valid_dataloader = DataLoader(valid_dataset, batch_size=64, shuffle=True, collate_fn=collate_batch)
 
-
-# %%
 # Define the training process
 def train(save_path:str, path_vocab:Vocab, 
     train_iter:DataLoader, val_iter:DataLoader, 
@@ -207,12 +176,4 @@ def train(save_path:str, path_vocab:Vocab,
         train_accu_loss = 0
         train_cnt = 0
 
-
-# %%
-train(save_path=save_path, path_vocab=path_vocab, train_iter=train_dataloader, val_iter=valid_dataloader, model_type=1)
-
-
-# %%
-
-
-
+train(save_path=save_path, path_vocab=path_vocab, train_iter=train_dataloader, val_iter=valid_dataloader, model_type=2, entity_vocab=entity_vocab)
