@@ -29,18 +29,15 @@ class Dataset_Generator:
         for pair in pairs:
             path = find_dependency_path_from_tree(doc, pair[0], pair[1])
             if path:
-                self.line_record.append((path, pair[0], pair[1]))
-            else:
-                print("%s %s %s" % (line_id, pair[0], pair[1]))
-                continue
-            self.line_record.append((find_dependency_path_from_tree(doc, pair[1], pair[0]), pair[1], pair[0]))
+                self.line_record.append((line_id, path, pair[0], pair[1]))
+                self.line_record.append((line_id, find_dependency_path_from_tree(doc, pair[1], pair[0]), pair[1], pair[0]))
 
 def dataset_generator_post_operation(result:list):
     print('End')
     ret = []
     for obj in result:
         ret = ret.append(obj.line_record)
-    return pd.DataFrame(ret, columns=['path', 'subj', 'obj'])
+    return pd.DataFrame(ret, columns=['line_id', 'path', 'subj', 'obj'])
 
 
 class TriEntities:
@@ -76,25 +73,3 @@ class TriEntities:
                 kw_set.update(pair)
             kw_set.remove(kw)
             self.line_record.append((sent, kw, ','.join(kw_set)))
-        # doc = nlp(sent)
-        # tokens = [token.text for token in doc]
-        # subj_test = False
-        # subj_text = ''
-        # obj_test = False
-        # obj_text = ''
-        # for kw in kws:
-        #     if doc[tokens.index(kw)].dep_ == 'nsubj':
-        #         subj_test = True
-        #         subj_text = kw
-        #     elif doc[tokens.index(kw)].dep_ == 'dobj':
-        #         obj_test = True
-        #         obj_text = kw
-        
-        # for pair in pairs:
-        #     path = find_dependency_path_from_tree(doc, pair[0], pair[1])
-        #     if path:
-        #         self.line_record.append((path, pair[0], pair[1]))
-        #     else:
-        #         print("%s %s %s" % (line_id, pair[0], pair[1]))
-        #         continue
-            # self.line_record.append((find_dependency_path_from_tree(doc, pair[1], pair[0]), pair[1], pair[0]))

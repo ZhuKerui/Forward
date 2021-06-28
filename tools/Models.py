@@ -78,7 +78,7 @@ class ScoreFunctionModel_1(nn.Module):
 
 class ScoreFunctionModel_2(nn.Module):
     def __init__(self, device:torch.device, path_vocab_size:int, ent_vocab_size:int, embed_dim:int):
-        super(ScoreFunctionModel_1, self).__init__()
+        super(ScoreFunctionModel_2, self).__init__()
         self.path_embedding = nn.Embedding(path_vocab_size, embed_dim, sparse=True)
         self.ent_embedding = nn.Embedding(ent_vocab_size, embed_dim, sparse=True)
         
