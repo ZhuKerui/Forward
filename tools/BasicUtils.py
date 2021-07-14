@@ -5,7 +5,10 @@ import multiprocessing
 from threading import Thread
 from math import ceil
 import subprocess
-
+import wikipedia
+import json
+import csv
+import re
 
 def ugly_normalize(vecs:np.ndarray):
     normalizers = np.sqrt((vecs * vecs).sum(axis=1))
@@ -29,6 +32,12 @@ def my_write(file_name:str, content:List[str]):
     with open(file_name, 'w') as f_out:
         f_out.write('\n'.join(content))
 
+def my_json_read(file_name:str):
+    return json.load(open(file_name, 'r'))
+
+def my_csv_read(file_name:str, delimiter:str=','):
+    return csv.reader(open(file_name, 'r'), delimiter=delimiter)
+    
 class MultiProcessing:
     def __line_process_wrapper(self, temp_obj, input_list:list, output_list):
         for line in input_list:
@@ -90,3 +99,26 @@ class MultiThreading:
 def my_email(title:str, message:str, email:str):
     cmd = 'echo "%s" | mail -s "%s" %s' % (message, title, email)
     subprocess.Popen(cmd, shell=True)
+
+# Collect wiki summary and process the text
+def get_wiki_page_from_kw(line:str):
+    try:
+        page = wikipedia.page(line)
+        return page if line.lower() == page.title.lower() else None
+    except:
+        return None
+
+def get_wiki_summary_from_kw(line:str):
+    page = get_wiki_page_from_kw(line)
+    return ' '.join(page.summary.split()) if page is not None else None
+
+def get_wiki_context_from_kw(line:str):
+    page = get_wiki_page_from_kw(line)
+    return ' '.join(page.content.split()) if page is not None else None
+
+def clean_sent(sent:str):
+    while re.search(r'{[^{}]*}', sent):
+        sent = re.sub(r'{[^{}]*}', '', sent)
+    while re.search(r'\([^()]*\)', sent):
+        sent = re.sub(r'\([^()]*\)', '', sent)
+    return re.sub(r'[^A-Za-z0-9,.\s-]', '', sent.strip())
