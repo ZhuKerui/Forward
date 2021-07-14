@@ -84,3 +84,52 @@
         ```
         + The top 30 frequent paths take around 35% of the whole paths
     6. There are many overlaps between the top frequent paths collected from closely related pairs and less related pairs
+
+## JULY 1
+
+### This week's goal
+> Do some survey and think about how we can use the original sentence in our score function.
+>
+> Think about what else features besides dependency path can we use in our score function.
+
+### This week's progress
+
+1. About other possible features for score function.
+    + Evaluate the importance of the relation with respect to the whole sentence.
+    + Perhaps some keyword phrases should not be splitted, like "python library" should not be considered as good expression for relation between "python" and "library"
+    + The position or the role of the keyword. Like, it would be better if the keyword is or is inside the subject or object of the sentence.
+
+2. Implemented part of the idea from paper "Open Relation Extraction and Grounding" to see if the "average commute time" could be helpful for our score function.
+
+3. Thought about using PageRank for collecting training data for score function or selecting sentence candidates.
+
+## JULY 8th
+
+### This week's goal
+> Try the 1st sentences from wikipedia page as the positive samples to train the score function model
+
+### This week's progress
+
+1. Trained a baseline score function model using the pretrained model of Bert.
+    + Dataset: 
+        + 5000 positive sentences from the "1st_wiki_new.json" file and,
+        + 5000 negative sentences from the "CS publications in the arxiv dataset by Cornell" (called "filtered_arxiv.json" on the Slack)
+    + Training:
+        + 8000 samples for training, 2000 samples for validation check
+        + Use Bert model to encode the sentences and do a binary classification
+    + Result:
+        + 1989 sentences out of 2000 sentences are correctly classified.
+    + Conclusion:
+        + There might exist some learnable patterns or semantic meaning to distinguish the wikipedia page's first sentences from other sentences.
+        + It is likely that the misclassified sentences are good sentences in the random corpus.
+        + It would be better if we could collect more good sentences and learn more useful patterns.
+        
+2. Run pagerank algorithm on a set of sentences containing a pair of keywords to see if the selected sentences are good sentences showing the relation
+    + Dataset:
+        + Sentences in the "filtered_arxiv.json" file
+    + Learning:
+        + Collect sentences which containing two keywords
+        + Encode the sentences using Bert
+        + Build a graph among the sentences, taking cosine similarity as the weight of edges
+        + Remove the edges pointing to itself or having weight smaller than a threshold
+        + Run pagerank and pick the top sentences
