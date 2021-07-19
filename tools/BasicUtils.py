@@ -1,6 +1,6 @@
 from typing import Iterable, List
 import numpy as np
-from heapq import nlargest
+from heapq import nlargest, nsmallest
 import multiprocessing
 from threading import Thread
 from math import ceil
@@ -25,8 +25,12 @@ def ntopidx(n, score:Iterable):
     s = nlargest(n, zip(np.arange(len(score)), score), key = lambda x: x[1])
     return [item[0] for item in s]
 
+def nsmallidx(n, score:Iterable):
+    s = nsmallest(n, zip(np.arange(len(score)), score), key = lambda x: x[1])
+    return [item[0] for item in s]
+
 def my_read(file_name:str):
-    return open(file_name, 'r').read().split('\n')
+    return open(file_name, 'r').read().strip().split('\n')
 
 def my_write(file_name:str, content:List[str]):
     with open(file_name, 'w') as f_out:
