@@ -8,6 +8,24 @@ nlp = spacy.load('en_core_web_sm')
 
 wnl = WordNetLemmatizer()
 
+def process_keywords(keywords:list):
+    filtered_words = set(['can', 'it', 'work', 'in', 'parts', 'is', 'its', 'or', 'and', 'a','b','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', ''])
+
+    stable_kw = []
+    unstable_kw = []
+    for kw in keywords:
+        if '- ' in kw:
+            continue
+        splited = kw.replace('-', ' - ')
+        reformed = ' '.join(sent_lemmatize(splited))
+        if reformed in filtered_words:
+            continue
+        if reformed == splited:
+            stable_kw.append(kw)
+        else:
+            unstable_kw.append('%s\t%s' % (kw, reformed))
+    return stable_kw, unstable_kw
+    
 def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
     MyTree = {}
     entities = []
