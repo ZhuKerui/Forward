@@ -97,8 +97,10 @@ class MultiThreading:
 
         for i in range(thread_num):
             threads[i].join()
-        sub_result = ['\n'.join(sub) for sub in result]
-        return '\n'.join(sub_result)
+        ret = []
+        for sub in result:
+            ret += sub
+        return ret
 
 def my_email(title:str, message:str, email:str):
     cmd = 'echo "%s" | mail -s "%s" %s' % (message, title, email)
@@ -119,6 +121,10 @@ def get_wiki_summary_from_kw(line:str):
 def get_wiki_context_from_kw(line:str):
     page = get_wiki_page_from_kw(line)
     return ' '.join(page.content.split()) if page is not None else None
+
+def get_wikipedia_entity(word:str):
+    suggestion, result = wikipedia.search(word, results=1, suggestion=True)
+    return suggestion[0] if suggestion else None
 
 def clean_sent(sent:str):
     while re.search(r'{[^{}]*}', sent):
