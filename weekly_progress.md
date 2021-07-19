@@ -133,3 +133,25 @@
         + Build a graph among the sentences, taking cosine similarity as the weight of edges
         + Remove the edges pointing to itself or having weight smaller than a threshold
         + Run pagerank and pick the top sentences
+
+## JULY 15th
+
+### This week's goal
+> Re-train the score function based on modified training dataset
+> Redo the pagerank test based on weight calculation from the paper
+
+### This week's progress
+
+1. Re-train the score function
+    + Dataset: 
+        + 3325 positive, 4708 negative, each in the format like: <CLS> python is a kind of programming language <SEP> <HEAD_ENT> python <TAIL_ENT> programming language <SEP>
+        + terms-cs-cfl-epoch200.txt
+    + Result:
+        + 1560 out of 1607 items are classified correctly
+        + Most of the "wrongly classified" items look like noises.
+        
+2. Run pagerank algorithm based on changed weight calculation
+    + Dataset:
+        + Sentences in the "filtered_arxiv.json" file or sentences from wikipedia page containing two keywords
+    + Result:
+        + wikipedia page may not be enough
