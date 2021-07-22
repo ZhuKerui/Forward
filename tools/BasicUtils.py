@@ -1,3 +1,4 @@
+from time import sleep
 from typing import Iterable, List
 import numpy as np
 from heapq import nlargest, nsmallest
@@ -8,7 +9,6 @@ import subprocess
 import wikipedia
 import json
 import csv
-import re
 
 def ugly_normalize(vecs:np.ndarray):
     normalizers = np.sqrt((vecs * vecs).sum(axis=1))
@@ -80,6 +80,7 @@ class MultiThreading:
             result = line_operation(line)
             if result is not None:
                 output_list.append(result)
+            sleep(0.1)
 
     def run(self, line_operation, input_list:list, thread_num:int=1):
         if thread_num <= 0:
@@ -125,10 +126,3 @@ def get_wiki_context_from_kw(line:str):
 def get_wikipedia_entity(word:str):
     suggestion, result = wikipedia.search(word, results=1, suggestion=True)
     return suggestion[0] if suggestion else None
-
-def clean_sent(sent:str):
-    while re.search(r'{[^{}]*}', sent):
-        sent = re.sub(r'{[^{}]*}', '', sent)
-    while re.search(r'\([^()]*\)', sent):
-        sent = re.sub(r'\([^()]*\)', '', sent)
-    return re.sub(r'[^A-Za-z0-9,.\s-]', '', sent.strip())

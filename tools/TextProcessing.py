@@ -1,8 +1,9 @@
 import json
 from tools.BasicUtils import my_read, my_write
 import numpy as np
+import re
 from typing import Dict
-from nltk import WordNetLemmatizer, pos_tag, word_tokenize
+from nltk import WordNetLemmatizer, pos_tag, word_tokenize, sent_tokenize
 import spacy
 nlp = spacy.load('en_core_web_sm')
 
@@ -26,6 +27,15 @@ def process_keywords(keywords:list):
             unstable_kw.append('%s\t%s' % (kw, reformed))
     return stable_kw, unstable_kw
     
+def clean_text(text:str):
+    while re.search(r'{[^{}]*}', text):
+        text = re.sub(r'{[^{}]*}', '', text)
+    while re.search(r'\([^()]*\)', text):
+        text = re.sub(r'\([^()]*\)', '', text)
+    while re.search(r'\[[^][]*\]', text):
+        text = re.sub(r'\[[^][]*\]', '', text)
+    return ' '.join(re.sub(r'[^a-z0-9,.;\s-]', '', text.lower()).replace('-', ' - ').strip().split())
+
 def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
     MyTree = {}
     entities = []
@@ -78,6 +88,12 @@ def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
         
 def sent_lemmatize(sentence:str):
     return [str(wnl.lemmatize(word, pos='n') if tag.startswith('NN') else word) for word, tag in pos_tag(word_tokenize(sentence))]
+
+def batched_sent_tokenize(paragraphs:list):
+    content = []
+    for para in paragraphs:
+        content += sent_tokenize(para)
+    return content
 
 def find_dependency_path(sent:str, kw1:str, kw2:str):
     doc = nlp(sent)
