@@ -1,46 +1,6 @@
-import re
-from nltk import sent_tokenize
 import sys
 
 sys.path.append('..')
-from tools.BasicUtils import get_wiki_page_from_kw
-
-# remove_list = ['See also', 'References', 'Further reading']
-
-# def collect_neg_sents_from_term(term:str, n:int=5):
-#     page = get_wiki_page_from_kw(term)
-#     if page is None:
-#         return None
-#     if page.content.lower().count(term) < (n * 2):
-#         return None
-#     neg_sents = []
-#     section_list = page.sections.copy()
-#     for item in remove_list:
-#         if item in section_list:
-#             section_list.remove(item)
-#     while len(neg_sents) < n and len(section_list) != 0:
-#         section = section_list.pop()
-#         section_text = page.section(section)
-#         if section_text is None:
-#             continue
-#         section_text = section_text.lower()
-#         if term not in section_text:
-#             continue
-#         # Remove {} and ()
-#         while re.search(r'{[^{}]*}', section_text):
-#             section_text = re.sub(r'{[^{}]*}', '', section_text)
-#         while re.search(r'\([^()]*\)', section_text):
-#             section_text = re.sub(r'\([^()]*\)', '', section_text)
-#         if term not in section_text:
-#             continue
-#         processed_text = ' '.join(section_text.split())
-#         temp_sents = sent_tokenize(processed_text)
-#         for sent in temp_sents:
-#             if term in sent:
-#                 neg_sents.append('%s\t%s' % (term, re.sub(r'[^A-Za-z0-9,.\s-]', '', sent.strip())))
-#                 if len(neg_sents) >= n:
-#                     break
-#     return '\n'.join(neg_sents) if neg_sents else None
 
 if __name__ == '__main__':
     import pandas as pd
@@ -50,8 +10,8 @@ if __name__ == '__main__':
     import tqdm
 
     # Load training and validation data
-    train_df = pd.read_csv('train.csv')
-    valid_df = pd.read_csv('valid.csv')
+    train_df = pd.read_csv('../data/temp/1st_sent/train.csv')
+    valid_df = pd.read_csv('../data/temp/1st_sent/valid.csv')
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -81,7 +41,7 @@ if __name__ == '__main__':
         for batch_df in tqdm.tqdm(batch_list):
             optim.zero_grad()
             labels = torch.tensor([1 if i == 'T' else 0 for i in batch_df.label.to_list()]).unsqueeze(1).to(device)
-            inputs = BatchEncoding(tokenizer(batch_df.sent.to_list(), batch_df.head_ent.to_list(), padding=True, truncation=True, max_length=80, return_tensors="pt")).to(device)
+            inputs = BatchEncoding(tokenizer(batch_df.sent.to_list(), batch_df.pair.to_list(), padding=True, truncation=True, max_length=80, return_tensors="pt")).to(device)
             output = model(**inputs, labels=labels)
             loss += output.loss
             output.loss.backward()
@@ -89,5 +49,5 @@ if __name__ == '__main__':
         print(loss / len(batch_list))
 
     # Save trained model
-    model.save_pretrained('temp2.pt')
-    tokenizer.save_pretrained('temp2.pt')
+    model.save_pretrained('../data/temp/1st_sent/test1.pt')
+    tokenizer.save_pretrained('../data/temp/1st_sent/test1.pt')
