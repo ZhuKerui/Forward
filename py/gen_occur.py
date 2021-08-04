@@ -1,11 +1,19 @@
-# python gen_occur.py wordtree_file keyword_file idx_sentence_file occur_file
+# python gen_occur.py keyword_file co_occur_file occur_file
+import tqdm
+import json
 import sys
 
 sys.path.append('..')
-from tools.BasicUtils import MultiProcessing
-from tools.DocProcessing.Occurrence import Occurrence, occurrence_dump, occurrence_post_operation
 
-# Generate occurrence file
-p = MultiProcessing()
-occur_dict = p.run(lambda: Occurrence(sys.argv[1], sys.argv[2]), open(sys.argv[3]).readlines(), 8, occurrence_post_operation)
-occurrence_dump(sys.argv[4], occur_dict)
+from tools.BasicUtils import my_read
+
+kws = my_read(sys.argv[1])
+co_occur = my_read(sys.argv[2])
+occur_dict = {kw:[] for kw in kws}
+for i, co_kws in tqdm.tqdm(enumerate(co_occur)):
+    if co_kws == '':
+        continue
+    co_kws = co_kws.split('\t')
+    for kw in co_kws:
+        occur_dict[kw].append(i)
+json.dump(occur_dict, open(sys.argv[3], 'w'))
