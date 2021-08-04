@@ -155,3 +155,25 @@
         + Sentences in the "filtered_arxiv.json" file or sentences from wikipedia page containing two keywords
     + Result:
         + wikipedia page may not be enough
+
+### This week's progress
+
+1. Dataset
+    + sentences on edge: Wikipedia sentences with 2 keywords co-occur
+    + gold sentences: Wikipedia sentences in "summary" section with specific manually defined structures, like "A be B", "A such as B", ...
+    + query sentences: "What is the relationship between A and B"
+
+2. Training (E.g., python and programming language)
+    1. Starting from "python", get its neighbours, except for "programming language", from each edge, retrieve k sentences
+        + one bert model encodes sentences on edge, 
+        + one bert model encodes query for present edge
+        + the final query is a combination of present query and the overall query
+        + e.g., present query: "What is the relationship between python and java"
+                overall query: "What is the relationship between python and programming language"
+
+    2. Record the k sentences, move to the next node, repeat step 1, until we reach "programming language"
+        + The step for choosing the next node should be guided by some algorithms
+
+    3. Repeat step 1 and 2, starting from "programming language"
+    4. Suppose we go through n nodes starting from "python" to "programming language", and m nodes from "programming language" to "python", 
+        we have (m+n)k sentences. Use BART to generate l output sequences, compute the loss between the outputs and the gold sentences.
