@@ -43,6 +43,7 @@ def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
     with open(input_txt, 'r', encoding='utf-8') as load_file:
         for word in load_file:
             # Directly add the '_' connected keyword
+            word = word.strip()
             phrase = word.replace('-', ' - ').split()
             if not phrase:
                 print(word)
