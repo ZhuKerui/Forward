@@ -126,3 +126,9 @@ def get_wiki_context_from_kw(line:str):
 def get_wikipedia_entity(word:str):
     suggestion, result = wikipedia.search(word, results=1, suggestion=True)
     return suggestion[0] if suggestion else None
+
+# Function for batch generation
+def batch(sents:Iterable, n:int):
+    l = len(sents)
+    for ndx in range(0, l, n):
+        yield sents[ndx:min(ndx + n, l)]
