@@ -4,4 +4,3 @@ data/
 *__pycache__
 *.csv
 *.pt
-*.txt
