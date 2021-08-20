@@ -1,8 +1,9 @@
-from transformers import EncoderDecoderModel, BertTokenizer, BertModel, BertForNextSentencePrediction, BatchEncoding
+from transformers import EncoderDecoderModel, BertTokenizer, BertModel, BertForNextSentencePrediction, BatchEncoding, AdamW
 import torch
 from torch.nn import Softmax, Linear, CrossEntropyLoss
 from torch.nn.functional import normalize, log_softmax
 from collections import defaultdict
+import tqdm
 import sys
 
 sys.path.append('..')
@@ -24,6 +25,8 @@ def my_encode(sents:List[str], sents2:List[str]=None, device:torch.device=None):
 
 def my_decode(input_ids:torch.Tensor):
     return my_tokenizer.batch_decode(input_ids)
+
+batch_size = 3
 # Models
 
 class SparseRetrieveSentForPairCoOccur:
@@ -79,7 +82,7 @@ class DenseRetrieverWithScore(torch.nn.Module):
         self.sparse_retriever = sparse_retriever
         self.sf = score_function
 
-    def forward(self, kw1_list:List[str], kw2_list:List[str], top_k:int=5):
+    def forward(self, kw1_list:List[str], kw2_list:List[str], top_k:int=batch_size):
         batches = []
         with torch.no_grad():
             for kw1, kw2 in zip(kw1_list, kw2_list):
@@ -152,13 +155,19 @@ class Reader3(torch.nn.Module):
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device is None else torch.device(device)
         self._encoder_decoder.encoder.resize_token_embeddings(len(my_tokenizer))
         self._encoder_decoder.decoder.resize_token_embeddings(len(my_tokenizer))
+        self._encoder_decoder.to(self._device)
 
-    def forward(self, input_ids, score:torch.Tensor, target_ids=None):
-        decoder_input_ids = target_ids
-        gen_output = self._encoder_decoder(input_ids = input_ids, decoder_input_ids = target_ids)
+    def forward(self, input_ids:torch.Tensor, score:torch.Tensor, target_ids:torch.Tensor=None):
+        decoder_input_ids = target_ids.repeat_interleave(batch_size, dim=0) if target_ids is not None else input_ids
+        gen_output = self._encoder_decoder(input_ids = input_ids, decoder_input_ids = decoder_input_ids)
+        if target_ids is not None:
+            ll = self.get_nll(gen_output.logits, score, target_ids, reduce_loss=True)
+            return gen_output, ll
+        else:
+            return gen_output
 
     def get_nll(
-        self, seq_logits:torch.Tensor, doc_scores:torch.Tensor, target:torch.Tensor, reduce_loss=False, epsilon=0.0, exclude_bos_score=False, n_docs:int=5
+        self, seq_logits:torch.Tensor, doc_scores:torch.Tensor, target:torch.Tensor, reduce_loss=False, epsilon=0.0, exclude_bos_score=False, n_docs:int=batch_size
     ) -> torch.Tensor:
         # shift tokens left
         pad_token_id = my_tokenizer.pad_token_id
@@ -231,3 +240,40 @@ def demo_reader(kw1, kw2, reader, sparse_retriever:SparseRetrieveSentForPairCoOc
         rels = reader(candidate_sents[:5], torch.rand((1,5)).to(device))
         torch.cuda.empty_cache()
     return rels
+
+class TrainModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.sparse_retriever = SparseRetrieveSentForPairCoOccur('../data/corpus/small_sent.txt', 'data/occur.json')
+        self.sf = ScoreFunction2()
+        self.dense_retriever = DenseRetrieverWithScore(self.sparse_retriever, self.sf)
+        self.reader = Reader3()
+
+    def forward(self, kw1s, kw2s, rels=None):
+        sents, scores = self.dense_retriever(kw1s, kw2s)
+        if rels is not None:
+            with my_tokenizer.as_target_tokenizer():
+                target = my_encode(rels)
+            output, loss = self.reader(sents['input_ids'], scores, target['input_ids'])
+            return output, loss
+        else:
+            output = self.reader(sents['input_ids'], scores)
+            return output
+
+def train():
+    model = TrainModel()
+    optim = AdamW(model.parameters(), lr=5e-5)
+    dataset = list(csv.reader(open('data/datasets.csv')))
+    batch_list = [item for item in batch(dataset, batch_size)]
+    for epoch in range(1):
+        for item in tqdm.tqdm(batch_list):
+            kw1s = [t[0] for t in item]
+            kw2s = [t[1] for t in item]
+            rels = [t[2] for t in item]
+            output, loss = model(kw1s, kw2s, rels)
+            loss.backward()
+            optim.step()
+            torch.cuda.empty_cache()
+
+if __name__ == '__main__':
+    train()

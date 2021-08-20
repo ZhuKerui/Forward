@@ -32,3 +32,5 @@ outputs = model(context_input_ids=docs_dict["context_input_ids"], context_attent
 # 2. Direct code
 inputs = tokenizer("How many people live in Paris?", return_tensors="pt")
 outputs = model(input_ids=inputs["input_ids"])
+
+outputs = None
