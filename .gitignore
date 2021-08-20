@@ -4,3 +4,4 @@ data/
 *__pycache__
 *.csv
 *.pt
+play_ground/
