@@ -265,15 +265,20 @@ def train():
     optim = AdamW(model.parameters(), lr=5e-5)
     dataset = list(csv.reader(open('data/datasets.csv')))
     batch_list = [item for item in batch(dataset, batch_size)]
-    for epoch in range(1):
-        for item in tqdm.tqdm(batch_list):
+    for epoch in range(4):
+        loss_sum = 0
+        i = 0
+        for i, item in enumerate(tqdm.tqdm(batch_list)):
             kw1s = [t[0] for t in item]
             kw2s = [t[1] for t in item]
             rels = [t[2] for t in item]
             output, loss = model(kw1s, kw2s, rels)
             loss.backward()
+            loss_sum += loss.detach()
             optim.step()
             torch.cuda.empty_cache()
+        print(loss_sum / (i + 1))
+    
 
 if __name__ == '__main__':
     train()
