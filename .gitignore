@@ -5,3 +5,6 @@ data/
 *.csv
 *.pt
 play_ground/
+*.washington_resoruce/
+*.stanfordnlp_resources/
+openie/
