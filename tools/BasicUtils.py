@@ -9,6 +9,7 @@ import subprocess
 import wikipedia
 import json
 import csv
+from collections import defaultdict
 
 def ugly_normalize(vecs:np.ndarray):
     normalizers = np.sqrt((vecs * vecs).sum(axis=1))
@@ -132,3 +133,14 @@ def batch(sents:Iterable, n:int):
     l = len(sents)
     for ndx in range(0, l, n):
         yield sents[ndx:min(ndx + n, l)]
+
+class SparseRetrieveSentForPairCoOccur:
+    def __init__(self, sent_file:str, occur_file:str):
+        self._sents = my_read(sent_file)
+        self._occur_dict = defaultdict(set)
+        for k, v in json.load(open(occur_file)).items():
+            self._occur_dict[k] = set(v)
+
+    def retrieve(self, kw1:str, kw2:str):
+        co_occur_index = self._occur_dict[kw1] & self._occur_dict[kw2]
+        return [self._sents[idx] for idx in co_occur_index]

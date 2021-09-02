@@ -2,7 +2,6 @@ from transformers import EncoderDecoderModel, BertTokenizer, BertModel, BertForN
 import torch
 from torch.nn import Softmax, Linear, CrossEntropyLoss
 from torch.nn.functional import normalize, log_softmax
-from collections import defaultdict
 import tqdm
 import sys
 
@@ -28,18 +27,6 @@ def my_decode(input_ids:torch.Tensor):
 
 batch_size = 3
 # Models
-
-class SparseRetrieveSentForPairCoOccur:
-    def __init__(self, sent_file:str, occur_file:str):
-        self._sents = my_read(sent_file)
-        self._occur_dict = defaultdict(set)
-        for k, v in json.load(open(occur_file)).items():
-            self._occur_dict[k] = set(v)
-
-    def retrieve(self, kw1:str, kw2:str):
-        co_occur_index = self._occur_dict[kw1] & self._occur_dict[kw2]
-        return [self._sents[idx] for idx in co_occur_index]
-
 
 class ScoreFunction1(torch.nn.Module):
     def __init__(self, model_file:str=default_base_model, device:str=None):

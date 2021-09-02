@@ -10,7 +10,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trai
 import sys
 
 sys.path.append('..')
-from joint_score_func import SparseRetrieveSentForPairCoOccur
+from tools.BasicUtils import SparseRetrieveSentForPairCoOccur
 import pdb
 
 tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
