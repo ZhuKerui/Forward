@@ -98,15 +98,15 @@ def batched_sent_tokenize(paragraphs:list):
 
 def find_dependency_path(sent:str, kw1:str, kw2:str):
     doc = nlp(sent)
-    return find_dependency_path_from_tree(doc, kw1, kw2)
-
-def find_dependency_path_from_tree(doc, kw1:str, kw2:str):
-    tokens = [t.text for t in doc]
-    try:
-        idx1 = tokens.index(kw1)
-        idx2 = tokens.index(kw2)
-    except:
+    kw1_spans = find_span(doc, kw1, True)
+    kw2_spans = find_span(doc, kw2, True)
+    if len(kw1_spans) != 1 or len(kw2_spans) != 1:
         return ''
+    return find_dependency_path_from_tree(doc, doc[kw1_spans[0][0]:kw1_spans[0][1]], doc[kw2_spans[0][0]:kw2_spans[0][1]])
+
+def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.tokens.span.Span):
+    idx1 = kw1[-1].i
+    idx2 = kw2[-1].i
     branch = np.zeros(len(doc))
     i = idx1
     while branch[i] == 0:
@@ -137,3 +137,9 @@ def find_dependency_path_from_tree(doc, kw1:str, kw2:str):
         return ' '.join(dep2)
     else:
         return ' '.join(dep1 + dep2)
+
+def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
+    phrase_tokens = phrase.split()
+    phrase_length = len(phrase_tokens)
+    sent_tokens = [str(t.lemma_ if use_lemma else t) for t in doc]
+    return [(i, i + phrase_length) for i in range(len(doc)-phrase_length+1) if phrase_tokens == sent_tokens[i : i + phrase_length]]

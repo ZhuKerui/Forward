@@ -2,7 +2,7 @@ from time import sleep
 from typing import Iterable, List
 import numpy as np
 from heapq import nlargest, nsmallest
-import multiprocessing
+from multiprocessing import Pool
 from threading import Thread
 from math import ceil
 import subprocess
@@ -44,36 +44,12 @@ def my_csv_read(file_name:str, delimiter:str=','):
     return csv.reader(open(file_name, 'r'), delimiter=delimiter)
     
 class MultiProcessing:
-    def __line_process_wrapper(self, temp_obj, input_list:list, output_list):
-        for line in input_list:
-            temp_obj.line_operation(line)
-        output_list.append(temp_obj)
+    def __init__(self, thread_num:int=1):
+        self.pool = Pool(processes=thread_num)
 
-    def run(self, obj_generator, input_list:list, thread_num:int=1, post_operation=None):
-        if thread_num <= 0:
-            return
-        line_count = len(input_list)
-        print('Number of lines is %d' % (line_count))
-        unit_lines = ceil(line_count / thread_num)
-
-        manager = multiprocessing.Manager()
-        result = manager.list()
-        processing = []
-        for i in range(thread_num):
-            processing.append(multiprocessing.Process(target=self.__line_process_wrapper, args=(obj_generator(), input_list[unit_lines*i : unit_lines*(i+1)], result)))
-
-        for i in range(thread_num):
-            processing[i].start()
-
-        for i in range(thread_num):
-            processing[i].join()
-        if post_operation:
-            return post_operation(result)
-        else:
-            ret = []
-            for sub in result:
-                ret += sub.line_record
-            return ret
+    def run(self, obj_generator, input_list:list):
+        print('Number of lines is %d' % len(input_list))
+        return self.pool.map(obj_generator, input_list)
 
 class MultiThreading:
     def __line_process_wrapper(self, line_operation, input_list:list, output_list:list):
