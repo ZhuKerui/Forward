@@ -6,14 +6,14 @@ import sys
 sys.path.append('..')
 
 from tools.BasicUtils import my_read
+from tools.DocProcessing import co_occur_load
 
 kws = my_read(sys.argv[1])
-co_occur = my_read(sys.argv[2])
+co_occur = co_occur_load(sys.argv[2])
 occur_dict = {kw:[] for kw in kws}
 for i, co_kws in tqdm.tqdm(enumerate(co_occur)):
-    if co_kws == '':
+    if not co_kws:
         continue
-    co_kws = co_kws.split('\t')
     for kw in co_kws:
         occur_dict[kw].append(i)
 json.dump(occur_dict, open(sys.argv[3], 'w'))

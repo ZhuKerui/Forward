@@ -1,5 +1,5 @@
 import json
-from tools.BasicUtils import my_read, my_write
+from tools.BasicUtils import my_write
 import numpy as np
 import re
 from typing import Dict
@@ -139,7 +139,72 @@ def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.to
         return ' '.join(dep1 + dep2)
 
 def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
+    """
+    Find all the occurances of a given phrase in the sentence using spacy.tokens.doc.Doc
+
+    Inputs
+    ----------
+    doc : spacy.tokens.doc.Doc
+        a doc analyzed by a spacy model
+
+    phrase : str
+        the phrase to be searched
+
+    use_lemma : bool
+        if true, the lemmazation is applied to each token before searching
+
+    Return
+    -------
+    A list of tuples (int, int), where the first int is the starting index and the section int is the ending index + 1
+    """
     phrase_tokens = phrase.split()
     phrase_length = len(phrase_tokens)
     sent_tokens = [str(t.lemma_ if use_lemma else t) for t in doc]
     return [(i, i + phrase_length) for i in range(len(doc)-phrase_length+1) if phrase_tokens == sent_tokens[i : i + phrase_length]]
+
+
+def find_noun_phrases(doc:spacy.tokens.doc.Doc):
+    """
+    Find all the noun phrases in the sentence using spacy.tokens.doc.Doc
+
+    Inputs
+    ----------
+    doc : spacy.tokens.doc.Doc
+        a doc analyzed by a spacy model
+
+    Return
+    -------
+    A list of noun phrases (spacy.tokens.span.Span) collected from the doc
+    """
+    noun_phrases_list = list(doc.noun_chunks)
+    if len(noun_phrases_list) < 2:
+        return noun_phrases_list
+    merge_noun_phrases = [noun_phrases_list[0]]
+    for i in range(1, len(noun_phrases_list)):
+        if noun_phrases_list[i-1][-1].i == (noun_phrases_list[i][0].i - 1):
+            merge_noun_phrases[-1] = doc[noun_phrases_list[i-1][0].i : noun_phrases_list[i][-1].i+1]
+        else:
+            merge_noun_phrases.append(noun_phrases_list[i])
+    return merge_noun_phrases
+
+
+def exact_match(pattern:re.Pattern, string:str):
+    """
+    Check whether the string exactly matches the re.Pattern. "Exactly" here means no extra substr is out of the pattern.
+
+    Inputs
+    ----------
+    pattern : re.Pattern
+        the re pattern
+
+    string : str
+        the string to be examined
+
+    Return
+    -------
+    True if the string matches the pattern exactly
+    """
+    mat = pattern.match(string)
+    if mat is None:
+        return False
+    return len(string) == mat.end()

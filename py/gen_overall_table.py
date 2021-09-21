@@ -1,9 +1,9 @@
 # python gen_overall_table.py entity_file co_occur_file pair_graph_file sentence_file dataset_file
 import sys
 sys.path.append('..')
-from tools.DocProcessing.CoOccurrence import co_occur_load
+from tools.DocProcessing import co_occur_load
 from tools.BasicUtils import my_read, my_email
-from tools.DocProcessing.CoOccurGraph import graph_load
+from tools.DocProcessing import graph_load
 from tools.TextProcessing import nlp, find_dependency_path_from_tree
 import pandas as pd
 import datetime
