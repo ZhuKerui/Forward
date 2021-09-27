@@ -43,7 +43,7 @@ def my_json_read(file_name:str):
 def my_csv_read(file_name:str, delimiter:str=','):
     return csv.reader(open(file_name, 'r'), delimiter=delimiter)
     
-class MultiProcessing:
+class MyMultiProcessing:
     def __init__(self, thread_num:int=1):
         self.pool = Pool(processes=thread_num)
 

@@ -176,7 +176,7 @@ def find_noun_phrases(doc:spacy.tokens.doc.Doc):
     -------
     A list of noun phrases (spacy.tokens.span.Span) collected from the doc
     """
-    noun_phrases_list = list(doc.noun_chunks)
+    noun_phrases_list = [s for s in doc.noun_chunks if s[-1].pos_ != 'PRON']
     if len(noun_phrases_list) < 2:
         return noun_phrases_list
     merge_noun_phrases = [noun_phrases_list[0]]
@@ -208,3 +208,24 @@ def exact_match(pattern:re.Pattern, string:str):
     if mat is None:
         return False
     return len(string) == mat.end()
+
+def my_sentence_tokenize(paragraph:str, use_spacy:bool=False):
+    """
+    Tokenize a paragraph string to sentences.
+
+    Inputs
+    ----------
+    paragraph : str
+        the paragraph string
+
+    use_spacy : bool
+        use spacy if true, nltk sent_tokenize otherwise.
+
+    Return
+    -------
+    List of sentences in the paragraph
+    """
+    if use_spacy:
+        return [str(s) for s in nlp(paragraph).sents]
+    else:
+        return sent_tokenize(paragraph)
