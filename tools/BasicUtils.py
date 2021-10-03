@@ -9,7 +9,27 @@ import subprocess
 import wikipedia
 import json
 import csv
+import tqdm
+import time
 from collections import defaultdict
+
+def calculate_time(func):
+     
+    # added arguments inside the inner1,
+    # if function takes any arguments,
+    # can be added like this.
+    def inner1(*args, **kwargs):
+ 
+        # storing time before function execution
+        begin = time.time()
+         
+        func(*args, **kwargs)
+ 
+        # storing time after function execution
+        end = time.time()
+        print("Total time taken in : ", func.__name__, end - begin)
+ 
+    return inner1
 
 def ugly_normalize(vecs:np.ndarray):
     normalizers = np.sqrt((vecs * vecs).sum(axis=1))
@@ -45,11 +65,17 @@ def my_csv_read(file_name:str, delimiter:str=','):
     
 class MyMultiProcessing:
     def __init__(self, thread_num:int=1):
-        self.pool = Pool(processes=thread_num)
+        self.thread_num = thread_num
 
-    def run(self, obj_generator, input_list:list):
+    @calculate_time
+    def run(self, func, input_list:list):
         print('Number of lines is %d' % len(input_list))
-        return self.pool.map(obj_generator, input_list)
+        with Pool(self.thread_num) as pool:
+            print('Start assigning jobs')
+            jobs = [pool.apply_async(func=func, args=(*argument,)) if isinstance(argument, tuple) else pool.apply_async(func=func, args=(argument,)) for argument in input_list]
+            pool.close()
+            print('Jobs are assigned, start getting results')
+            return [job.get() for job in tqdm.tqdm(jobs)]
 
 class MultiThreading:
     def __line_process_wrapper(self, line_operation, input_list:list, output_list:list):

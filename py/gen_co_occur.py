@@ -1,4 +1,4 @@
-# python gen_co_occur.py wordtree_file sentence_file co_occur_file
+# python gen_co_occur.py wordtree_file token_file use_greedy(T/F) sentence_file co_occur_file
 import tqdm
 import sys
 
@@ -8,8 +8,8 @@ from tools.BasicUtils import my_read, my_write
 from tools.TextProcessing import sent_lemmatize
 from tools.DocProcessing import CoOccurrence
 
-o = CoOccurrence(sys.argv[1])
-sents = my_read(sys.argv[2])
+o = CoOccurrence(sys.argv[1], sys.argv[2], sys.argv[3] == 'T')
+sents = my_read(sys.argv[4])
 ret = [o.line_operation(sent_lemmatize(sent)) for sent in tqdm.tqdm(sents)]
 ret_text = ['' if item is None else '\t'.join(item) for item in ret]
-my_write(sys.argv[3], ret_text)
+my_write(sys.argv[5], ret_text)

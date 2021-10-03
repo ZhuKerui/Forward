@@ -2,10 +2,19 @@ import json
 import networkx as nx
 from typing import List
 import math
-from tools.TextProcessing import sent_lemmatize
+from tools.TextProcessing import sent_lemmatize, find_span, nlp, find_noun_phrases, find_dependency_path_from_tree, exact_match
 from tools.BasicUtils import my_json_read, my_read
+import tqdm
+import pickle
+import re
+import pandas as pd
+
 
 class SentenceReformer:
+    """
+    Reform a sentence so that all keywords in the sentence will be transformed to single token. Eg, "python is a kind of programming language" -> "python is a kind of programming_language"
+    (This class is rarely used now)
+    """
     
     def __init__(self, json_file:str):
         self.MyTree = json.load(open(json_file, 'r'))
@@ -48,28 +57,55 @@ class SentenceReformer:
 
 
 class CoOccurrence:
-    def __init__(self, wordtree_file:str):
-        self.wordtree = my_json_read(wordtree_file)
+    """
+    Find all the keywords that occur in the list of str.
+    """
+    def __init__(self, wordtree_file:str, token_file:str):
+        with open(wordtree_file, 'rb') as f_in:
+            self.wordtree = pickle.load(f_in)
+        self.token2idx = {token.strip() : i for i, token in enumerate(open(token_file))}
 
-    def line_operation(self, reformed_sent:list):
+    def line_operation(self, reformed_sent:list, greedy:bool=False):
         i = 0
         kw_set_for_line = set()
-        while i < len(reformed_sent):
-            if reformed_sent[i] in self.wordtree: # If the word is the start word of a keyword
+        idxs = [self.token2idx[token] if token in self.token2idx else -1 for token in reformed_sent]
+        while i < len(idxs):
+            if idxs[i] in self.wordtree: # If the word is the start word of a keyword
                 phrase_buf = []
+                temp_buf = []
+                last_end_point = i
                 it = self.wordtree
                 j = i
-                while j < len(reformed_sent) and reformed_sent[j] in it:
-                    # Add the word to the wait list
-                    phrase_buf.append(reformed_sent[j])
-                    if "" in it[reformed_sent[j]]: # If the word could be the last word of a keyword, update the list
-                        kw_set_for_line.add(' '.join(phrase_buf).replace(' - ', '-'))
-                    # Go down the tree to the next child
-                    it = it[reformed_sent[j]]
-                    j += 1
-                    i = j - 1
-            i += 1
-        return kw_set_for_line if kw_set_for_line else None
+                while j <= len(idxs):
+                    if j == len(idxs):
+                        if phrase_buf:
+                            kw_set_for_line.add(' '.join(phrase_buf))
+                        break
+                    elif idxs[j] not in it or idxs[j] == -1:
+                        if phrase_buf:
+                            kw_set_for_line.add(' '.join(phrase_buf))
+                        break
+                    else:
+                        temp_buf.append(reformed_sent[j])
+                        if -1 in it[idxs[j]]:
+                            # Update the longest consecutive token sequence
+                            phrase_buf += temp_buf
+                            temp_buf = []
+                            last_end_point = j
+                            if greedy:
+                                # If the word could be the last word of a keyword and we are using greedy, update the set
+                                kw_set_for_line.add(' '.join(phrase_buf))
+                        # Go down the tree to the next child
+                        it = it[idxs[j]]
+                        j += 1
+                if greedy:
+                    i += 1
+                else:
+                    i = last_end_point + 1
+            else:
+                i += 1
+
+        return kw_set_for_line
 
 def co_occur_load(co_occur_file:str):
     return [line.split('\t') for line in my_read(co_occur_file)]

@@ -1,52 +1,83 @@
 import json
-from tools.BasicUtils import my_write
+from tools.BasicUtils import my_write, MyMultiProcessing, calculate_time
 import numpy as np
 import re
+import tqdm
 from typing import Dict
+import pickle
 from nltk import WordNetLemmatizer, pos_tag, word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
 import spacy
 nlp = spacy.load('en_core_web_sm')
 
 wnl = WordNetLemmatizer()
 
-def process_keywords(keywords:list):
-    filtered_words = set(['can', 'it', 'work', 'in', 'parts', 'is', 'its', 'or', 'and', 'a','b','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', ''])
+filtered_words = set(['can', 'it', 'work', 'in', 'form', 'parts', 'is', 'its', 'or', 'and', 'a','b','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', ''])
+filtered_words.update(set(stopwords.words('english')))
 
+def filter_specific_keywords(keywords:list):
+    return [kw for kw in keywords if kw not in filtered_words]
+
+def process_keywords(keywords:list):
+    keywords = filter_specific_keywords(keywords)
     stable_kw = []
     unstable_kw = []
     for kw in keywords:
-        if '- ' in kw:
-            continue
-        splited = kw.replace('-', ' - ')
-        reformed = ' '.join(sent_lemmatize(splited))
-        if reformed in filtered_words:
-            continue
-        if reformed == splited:
+        # if '- ' in kw:
+        #     continue
+        # splited = kw.replace('-', ' - ')
+        # reformed = ' '.join(sent_lemmatize(splited))
+        reformed = ' '.join(sent_lemmatize(kw))
+        # if reformed == splited:
+        if reformed == kw:
             stable_kw.append(kw)
         else:
             unstable_kw.append('%s\t%s' % (kw, reformed))
     return stable_kw, unstable_kw
-    
-def clean_text(text:str):
+
+def normalize_text(text:str):
+    tokens = text.lower().split()
+    refine_tokens = []
+    for token in tokens:
+        if token.isalnum():
+            refine_tokens.append(token)
+        else:
+            temp_str = ''
+            for char in token:
+                if char.isalnum() or char == "'" or char == '.':
+                    temp_str += char
+                else:
+                    refine_tokens.append(temp_str)
+                    refine_tokens.append(char)
+                    temp_str = ''
+            if temp_str:
+                refine_tokens.append(temp_str)
+    return ' '.join(refine_tokens)
+
+def remove_brackets(text:str):
     while re.search(r'{[^{}]*}', text):
         text = re.sub(r'{[^{}]*}', '', text)
     while re.search(r'\([^()]*\)', text):
         text = re.sub(r'\([^()]*\)', '', text)
     while re.search(r'\[[^][]*\]', text):
         text = re.sub(r'\[[^][]*\]', '', text)
-    return ' '.join(re.sub(r'[^a-z0-9,.;\s-]', '', text.lower()).replace('-', ' - ').strip().split())
+    return ' '.join(text.split())
 
+def clean_text(text:str):
+    return ' '.join(re.sub(r'[^a-z0-9,.;\s-]', '', remove_brackets(normalize_text(text))).split())
+
+@calculate_time
 def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
     MyTree = {}
     entities = []
     cnt = 0
     with open(input_txt, 'r', encoding='utf-8') as load_file:
-        for word in load_file:
+        keywords = load_file.readlines()
+        for word in tqdm.tqdm(keywords):
             # Directly add the '_' connected keyword
             word = word.strip()
-            phrase = word.replace('-', ' - ').split()
+            phrase = word.split()
             if not phrase:
-                print(word)
                 continue
             entities.append('_'.join(phrase))
             cnt += 1
@@ -87,6 +118,59 @@ def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
         json.dump(MyTree, output_file)
     my_write(entity_file, entities)
         
+@calculate_time
+def build_word_tree_v2(input_txt:str, dump_file:str, token_file:str):
+    MyTree = {}
+    with open(input_txt, 'r', encoding='utf-8') as load_file:
+        keywords_str = load_file.read().strip()
+        token_list = list(set(keywords_str.split()))
+        token2idx = {token:i for i, token in enumerate(token_list)}
+        print('transform keywords into index')
+        keywords = keywords_str.splitlines()
+        keywords_idx = [[token2idx[token] for token in kw.split()] for kw in tqdm.tqdm(keywords)]
+        print('start building wordtree')
+        for i, word in enumerate(tqdm.tqdm(keywords_idx)):
+            if not word:
+                print('Bad word at line', i, keywords[i])
+                return
+            # Insert the keyword to the tree structure
+            if len(word) == 1:
+                # If the word is an atomic word instead of a phrase
+                if word[0] not in MyTree:
+                    # If this is the first time that this word is inserted to the tree
+                    MyTree[word[0]] = {-1:-1}
+                elif -1 not in MyTree[word[0]]:
+                    # If the word has been inserted but is viewed as an atomic word the first time
+                    MyTree[word[0]][-1] = -1
+                # If the word has already been inserted as an atomic word, then we do nothing
+            else:
+                # If the word is an phrase
+                length = len(word)
+                fw = word[0]
+                if fw not in MyTree:
+                    MyTree[fw] = {}
+                temp_dict = MyTree
+                parent_node = fw
+                for i in range(1, length):
+                    if word[i]:
+                        sw = word[i]
+                        if sw not in temp_dict[parent_node]:
+                            # The second word is inserted to as the child of parent node the first time
+                            temp_dict[parent_node][sw] = {}
+                        if i == length - 1:
+                            # If the second word is the last word in the phrase
+                            if -1 not in temp_dict[parent_node][sw]:
+                                temp_dict[parent_node][sw][-1] = -1
+                        else:
+                            # If the second word is not the last word in the phrase
+                            temp_dict = temp_dict[parent_node]
+                            parent_node = sw
+        print('Building word tree is accomplished with %d words added' % (len(keywords)))
+        with open(dump_file, 'wb') as output_file:
+            pickle.dump(MyTree, output_file)
+        my_write(token_file, token_list)
+
+
 def sent_lemmatize(sentence:str):
     return [str(wnl.lemmatize(word, pos='n') if tag.startswith('NN') else word) for word, tag in pos_tag(word_tokenize(sentence))]
 
@@ -95,14 +179,6 @@ def batched_sent_tokenize(paragraphs:list):
     for para in paragraphs:
         content += sent_tokenize(para)
     return content
-
-def find_dependency_path(sent:str, kw1:str, kw2:str):
-    doc = nlp(sent)
-    kw1_spans = find_span(doc, kw1, True)
-    kw2_spans = find_span(doc, kw2, True)
-    if len(kw1_spans) != 1 or len(kw2_spans) != 1:
-        return ''
-    return find_dependency_path_from_tree(doc, doc[kw1_spans[0][0]:kw1_spans[0][1]], doc[kw2_spans[0][0]:kw2_spans[0][1]])
 
 def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.tokens.span.Span):
     idx1 = kw1[-1].i
@@ -138,6 +214,7 @@ def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.to
     else:
         return ' '.join(dep1 + dep2)
 
+
 def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
     """
     Find all the occurances of a given phrase in the sentence using spacy.tokens.doc.Doc
@@ -155,12 +232,12 @@ def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
 
     Return
     -------
-    A list of tuples (int, int), where the first int is the starting index and the section int is the ending index + 1
+    A list of phrases (spacy.tokens.span.Span) found in the doc
     """
     phrase_tokens = phrase.split()
     phrase_length = len(phrase_tokens)
     sent_tokens = [str(t.lemma_ if use_lemma else t) for t in doc]
-    return [(i, i + phrase_length) for i in range(len(doc)-phrase_length+1) if phrase_tokens == sent_tokens[i : i + phrase_length]]
+    return [doc[i : i + phrase_length] for i in range(len(doc)-phrase_length+1) if phrase_tokens == sent_tokens[i : i + phrase_length]]
 
 
 def find_noun_phrases(doc:spacy.tokens.doc.Doc):
@@ -208,6 +285,7 @@ def exact_match(pattern:re.Pattern, string:str):
     if mat is None:
         return False
     return len(string) == mat.end()
+
 
 def my_sentence_tokenize(paragraph:str, use_spacy:bool=False):
     """
