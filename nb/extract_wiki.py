@@ -1,6 +1,7 @@
 # python extract_wiki.py collect_sents
 # python extract_wiki.py collect_sents sentence_file output_file use_id[T/F] keyword_only[T/F]
 # python extract_wiki.py collect_kw_occur_from_selected
+# python extract_wiki.py collect_kw_occur_from_sents
 # python extract_wiki.py build_graph
 
 import re
@@ -190,7 +191,9 @@ if __name__ == '__main__':
 
     wiki_files = []
     save_sent_files = []
+    save_cooccur_files = []
     save_selected_files = []
+
     for save_dir in save_sub_folders:
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
@@ -199,6 +202,7 @@ if __name__ == '__main__':
         files = [f for f in os.listdir(wiki_sub_folders[i])]
         wiki_files += [os.path.join(wiki_sub_folders[i], f) for f in files]
         save_sent_files += [os.path.join(save_sub_folders[i], f+'.dat') for f in files]
+        save_cooccur_files += [os.path.join(save_sub_folders[i], f+'_co.dat') for f in files]
         save_selected_files += [os.path.join(save_sub_folders[i], f+'.tsv') for f in files]
 
     p = MyMultiProcessing(20)
@@ -229,6 +233,17 @@ if __name__ == '__main__':
         collect_kw_occur_from_selected(save_selected_files, keyword_occur)
         with open(keyword_occur_file, 'wb') as f_out:
             pickle.dump(keyword_occur, f_out)
+
+
+    elif sys.argv[1] == 'collect_kw_occur_from_sents':
+        co = CoOccurrence(wikipedia_wordtree_file, wikipedia_token_file)
+        def collect_kw_occur_from_sents(save_sent_file:str, save_cooccur_file:str):
+            sents = my_read(save_sent_file)
+            cooccur_list = ['\t'.join(co.line_operation(sent_lemmatize(sent))) for sent in sents]
+            my_write(save_cooccur_file, cooccur_list)
+        input_list = [(save_sent_files[i], save_cooccur_files[i]) for i in range(len(save_sent_files))]
+        p.run(collect_kw_occur_from_sents, input_list=input_list)
+
 
     elif sys.argv[1] == 'build_graph':
         # Load keyword occur dict which has occurance record for all keywords in selected sentences

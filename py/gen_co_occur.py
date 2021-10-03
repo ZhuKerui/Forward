@@ -10,6 +10,5 @@ from tools.DocProcessing import CoOccurrence
 
 o = CoOccurrence(sys.argv[1], sys.argv[2], sys.argv[3] == 'T')
 sents = my_read(sys.argv[4])
-ret = [o.line_operation(sent_lemmatize(sent)) for sent in tqdm.tqdm(sents)]
-ret_text = ['' if item is None else '\t'.join(item) for item in ret]
+ret_text = ['\t'.join(o.line_operation(sent_lemmatize(sent))) for sent in tqdm.tqdm(sents)]
 my_write(sys.argv[5], ret_text)
