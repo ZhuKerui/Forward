@@ -2,12 +2,14 @@
 # python extract_wiki.py collect_sents sentence_file output_file use_id[T/F] keyword_only[T/F]
 # python extract_wiki.py collect_kw_occur_from_selected
 # python extract_wiki.py collect_kw_occur_from_sents
-# python extract_wiki.py build_graph
+# python extract_wiki.py build_graph_from_selected
+# python extract_wiki.py build_graph_from_cooccur
 
 import re
 import os
 import tqdm
 import csv
+import math
 import pickle
 import networkx as nx
 import pandas as pd
@@ -16,7 +18,7 @@ from typing import List
 import sys
 sys.path.append('..')
 
-from tools.BasicUtils import MyMultiProcessing, my_read, my_write
+from tools.BasicUtils import MyMultiProcessing, my_read, my_write, calculate_time
 from tools.TextProcessing import remove_brackets, batched_sent_tokenize, nlp, find_span, sent_lemmatize, find_noun_phrases, find_dependency_path_from_tree, exact_match
 from tools.DocProcessing import CoOccurrence
 
@@ -26,11 +28,13 @@ wikipedia_dir = '../../data/wikipedia/full_text-2021-03-20'
 wikipedia_entity_file = 'data/extract_wiki/wikipedia_entity.tsv'
 wikipedia_entity_norm_file = 'data/extract_wiki/wikipedia_entity_norm.tsv'
 wikipedia_keyword_file = 'data/extract_wiki/keywords.txt'
+wikipedia_keyword_filtered_file = 'data/extract_wiki/keywords_f.txt'
 wikipedia_wordtree_file = 'data/extract_wiki/wordtree.pickle'
 wikipedia_token_file = 'data/extract_wiki/tokens.txt'
 save_path = 'data/extract_wiki/wiki_sent_collect'
 keyword_occur_file = 'data/extract_wiki/keyword_occur.pickle'
 keyword_connection_graph_file = 'data/extract_wiki/keyword_graph.pickle'
+keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'
 
 
 # Some task specific classes
@@ -165,8 +169,40 @@ def collect_kw_occur_from_selected(files:list, keyword_dict:dict):
                 if tail in keyword_dict:
                     keyword_dict[tail].add('%s:%d' % (file_note, i))
 
+@calculate_time
+def build_graph_from_cooccur(keyword_file:str, files:list):
+    g = nx.Graph(c=0)
+    kw2idx = {kw:i for i, kw in enumerate(my_read(keyword_file))}
+    g.add_nodes_from(range(len(kw2idx)), c=0)
+    print('Reading Co-occurrence lines')
+    for file in tqdm.tqdm(files):
+        with open(file) as f_in:
+            for line in f_in:
+                kws = [kw2idx.get(kw) for kw in line.strip().split('\t')]
+                kws = [kw for kw in kws if kw]
+                kw_num = len(kws)
+                if kw_num < 2:
+                    continue
+                g.graph['c'] += kw_num * (kw_num - 1) / 2
+                for i in range(kw_num):
+                    g.nodes[kws[i]]['c'] += (kw_num - 1)
+                    for j in range(i+1, kw_num):
+                        if not g.has_edge(kws[i], kws[j]):
+                            g.add_edge(kws[i], kws[j], c=1)
+                        else:
+                            g.edges[kws[i], kws[j]]['c'] += 1
+    print('Reading Done! NPMI analysis starts...')
+    Z = float(g.graph['c'])
+    for e, attr in g.edges.items():
+        h_x = math.log2(g.nodes[e[0]]['c'] / Z)
+        h_y = math.log2(g.nodes[e[1]]['c'] / Z)
+        h_xy = math.log2(attr['c'] / Z)
+        attr['npmi'] = (h_x + h_y) / h_xy - 1
+    print('NPMI analysis Done')
+    return g
 
-def build_graph(save_selected_file_list:list, keyword_set):
+
+def build_graph_from_selected(save_selected_file_list:list, keyword_set):
     g = nx.Graph()
     print('Reading Co-occurrence lines')
     for f in tqdm.tqdm(save_selected_file_list):
@@ -245,10 +281,16 @@ if __name__ == '__main__':
         p.run(collect_kw_occur_from_sents, input_list=input_list)
 
 
-    elif sys.argv[1] == 'build_graph':
+    elif sys.argv[1] == 'build_graph_from_selected':
         # Load keyword occur dict which has occurance record for all keywords in selected sentences
         with open(keyword_occur_file, 'rb') as f_in:
             keyword_occur = pickle.load(f_in)
-        keyword_connection_graph = build_graph(save_selected_files, keyword_occur)
+        keyword_connection_graph = build_graph_from_selected(save_selected_files, keyword_occur)
         with open(keyword_connection_graph_file, 'wb') as f_out:
             pickle.dump(keyword_connection_graph, f_out)
+
+    elif sys.argv[1] == 'build_graph_from_cooccur':
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        keyword_npmi_graph = build_graph_from_cooccur(wikipedia_keyword_filtered_file, save_cooccur_files)
+        with open(keyword_npmi_graph_file, 'wb') as f_out:
+            pickle.dump(keyword_npmi_graph, f_out)

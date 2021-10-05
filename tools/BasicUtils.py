@@ -23,11 +23,12 @@ def calculate_time(func):
         # storing time before function execution
         begin = time.time()
          
-        func(*args, **kwargs)
+        data = func(*args, **kwargs)
  
         # storing time after function execution
         end = time.time()
         print("Total time taken in : ", func.__name__, end - begin)
+        return data
  
     return inner1
 
