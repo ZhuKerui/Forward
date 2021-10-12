@@ -108,20 +108,15 @@ class CoOccurrence:
         return kw_set_for_line
 
 def co_occur_load(co_occur_file:str):
-    return [line.split('\t') for line in my_read(co_occur_file)]
+    return [line.split('\t') if line != '' else [] for line in my_read(co_occur_file)]
 
-
-def occurrence_load(occur_file:str):
-    with open(occur_file) as f_in:
-        temp_dict = json.load(f_in)
-        return {str(key):set(val) for key, val in temp_dict.items()}
 
 # Graph related functions
 def build_graph(co_occur_list:List[List[str]], keyword_list:List[str]):
     g = nx.Graph(c=0)
     g.add_nodes_from(keyword_list, c=0)
     print('Reading Co-occurrence lines')
-    for line_idx, line in enumerate(co_occur_list):
+    for line in tqdm.tqdm(co_occur_list):
         kw_num = len(line)
         g.graph['c'] += kw_num * (kw_num - 1)
         for i in range(kw_num):
@@ -132,12 +127,10 @@ def build_graph(co_occur_list:List[List[str]], keyword_list:List[str]):
                 if not g.has_edge(u, v):
                     g.add_edge(u, v, c=0)
                 g.edges[u, v]['c'] += 1
-        if line_idx % 5000 == 0:
-            print('\r%d' % line_idx, end='')
     print('')
     print('Reading Done! NPMI analysis starts...')
     Z = float(g.graph['c'])
-    for e, attr in g.edges.items():
+    for e, attr in tqdm.tqdm(list(g.edges.items())):
         attr['npmi'] = -math.log((2 * Z * attr['c']) / (g.nodes[e[0]]['c'] * g.nodes[e[1]]['c'])) / math.log(2 * attr['c'] / Z)
     print('NPMI analysis Done')
     return g
