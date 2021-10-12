@@ -47,7 +47,8 @@ def normalize_text(text:str):
                 if char.isalnum() or char == "'" or char == '.':
                     temp_str += char
                 else:
-                    refine_tokens.append(temp_str)
+                    if temp_str:
+                        refine_tokens.append(temp_str)
                     refine_tokens.append(char)
                     temp_str = ''
             if temp_str:

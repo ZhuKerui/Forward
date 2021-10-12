@@ -4,6 +4,7 @@
 # python extract_wiki.py collect_kw_occur_from_sents
 # python extract_wiki.py build_graph_from_selected
 # python extract_wiki.py build_graph_from_cooccur
+# python extract_wiki.py build_graph_from_cooccur_v2
 
 import re
 import os
@@ -15,11 +16,13 @@ import networkx as nx
 import pandas as pd
 from urllib.parse import unquote
 from typing import List
+from collections import Counter
 import sys
+import linecache
 sys.path.append('..')
 
 from tools.BasicUtils import MyMultiProcessing, my_read, my_write, calculate_time
-from tools.TextProcessing import remove_brackets, batched_sent_tokenize, nlp, find_span, sent_lemmatize, find_noun_phrases, find_dependency_path_from_tree, exact_match
+from tools.TextProcessing import normalize_text, remove_brackets, batched_sent_tokenize, nlp, find_span, sent_lemmatize, find_noun_phrases, find_dependency_path_from_tree, exact_match
 from tools.DocProcessing import CoOccurrence
 
 
@@ -35,7 +38,15 @@ save_path = 'data/extract_wiki/wiki_sent_collect'
 keyword_occur_file = 'data/extract_wiki/keyword_occur.pickle'
 keyword_connection_graph_file = 'data/extract_wiki/keyword_graph.pickle'
 keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'
+keyword_npmi_graph_file_v2 = 'data/extract_wiki/keyword_npmi_graph_v2.pickle'
+keyword_count_file = 'data/extract_wiki/keyword_count.pickle'
 
+test_path = 'data/extract_wiki/wiki_sent_test'
+w2vec_dump_file = 'data/extract_wiki/enwiki_20180420_win10_100d.pkl.bz2'
+w2vec_keyword_file = 'data/extract_wiki/w2vec_keywords.txt'
+w2vec_wordtree_file = 'data/extract_wiki/w2vec_wordtree.pickle'
+w2vec_token_file = 'data/extract_wiki/w2vec_tokens.txt'
+w2vec_keyword2idx_file = 'data/extract_wiki/w2vec_keyword2idx.pickle'
 
 # Some task specific classes
 class SentenceFilter:
@@ -153,6 +164,7 @@ def get_sentence(wiki_file:str, save_sent_file:str):
                         line = line.replace(l, kw)
                 paragraphs.append(line.lower())
     sents = batched_sent_tokenize(paragraphs)
+    sents = [normalize_text(sent) for sent in sents]
     my_write(save_sent_file, sents)
 
 
@@ -168,6 +180,7 @@ def collect_kw_occur_from_selected(files:list, keyword_dict:dict):
                     keyword_dict[head].add('%s:%d' % (file_note, i))
                 if tail in keyword_dict:
                     keyword_dict[tail].add('%s:%d' % (file_note, i))
+
 
 @calculate_time
 def build_graph_from_cooccur(keyword_file:str, files:list):
@@ -202,6 +215,45 @@ def build_graph_from_cooccur(keyword_file:str, files:list):
     return g
 
 
+@calculate_time
+def build_graph_from_cooccur_v2(keyword_file:str, files:list):
+    kw2idx = {kw:i for i, kw in enumerate(my_read(keyword_file))}
+    g = {idx : {'C':0} for idx in range(len(kw2idx))}
+    g['C'] = 0
+    print('Reading Co-occurrence lines')
+    for file in tqdm.tqdm(files):
+        with open(file) as f_in:
+            for line in f_in:
+                kws = [kw2idx.get(kw) for kw in line.strip().split('\t')]
+                kws = [kw for kw in kws if kw is not None]
+                kw_num = len(kws)
+                if kw_num < 2:
+                    continue
+                g['C'] += kw_num * (kw_num - 1) / 2
+                for i in range(kw_num):
+                    g[kws[i]]['C'] += (kw_num - 1)
+                    for j in range(i+1, kw_num):
+                        kw1, kw2 = (kws[i], kws[j]) if kws[i] < kws[j] else (kws[j], kws[i])
+                        if kw2 not in g[kw1]:
+                            g[kw1][kw2] = {'C':1}
+                        else:
+                            g[kw1][kw2]['C'] += 1
+    print('Reading Done! NPMI analysis starts...')
+    Z = float(g['C'])
+    for kw1 in range(len(kw2idx)):
+        if len(g[kw1]) <= 1:
+            continue
+        h_1 = math.log2(g[kw1]['C'] / Z)
+        for kw2, val in g[kw1].items():
+            if kw2 == 'C':
+                continue
+            h_2 = math.log2(g[kw2]['C'] / Z)
+            h_12 = math.log2(val['C'] / Z)
+            val['NPMI'] = (h_1 + h_2) / h_12 - 1
+    print('NPMI analysis Done')
+    return g
+
+
 def build_graph_from_selected(save_selected_file_list:list, keyword_set):
     g = nx.Graph()
     print('Reading Co-occurrence lines')
@@ -214,6 +266,25 @@ def build_graph_from_selected(save_selected_file_list:list, keyword_set):
                 if line[1] in keyword_set and line[4] in keyword_set:
                     g.add_edge(line[1], line[4])
     return g
+
+
+def filter_keyword_by_freq(save_cooccur_file_list:list):
+    c = Counter()
+    for file in tqdm.tqdm(save_cooccur_file_list):
+        with open(file) as f_in:
+            for line in f_in:
+                line = line.strip()
+                if line:
+                    c.update(line.split('\t'))
+    return c
+
+
+def line2note(filename:str, line_idx:int):
+    return filename[len(save_path)+1:].replace('/wiki_', ':')[:-4] + ':' + str(line_idx)
+
+def note2line(note:str):
+    sub_folder, sub_file, line_idx = note.split(':')
+    return linecache.getline(save_path + '/' + sub_folder + '/wiki_' + sub_file + '.dat', int(line_idx))
 
 
 if __name__ == '__main__':
@@ -293,4 +364,10 @@ if __name__ == '__main__':
         # Load keyword occur dict which has occurance record for all keywords in selected sentences
         keyword_npmi_graph = build_graph_from_cooccur(wikipedia_keyword_filtered_file, save_cooccur_files)
         with open(keyword_npmi_graph_file, 'wb') as f_out:
+            pickle.dump(keyword_npmi_graph, f_out)
+
+    elif sys.argv[1] == 'build_graph_from_cooccur_v2':
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        keyword_npmi_graph = build_graph_from_cooccur_v2(wikipedia_keyword_filtered_file, save_cooccur_files)
+        with open(keyword_npmi_graph_file_v2, 'wb') as f_out:
             pickle.dump(keyword_npmi_graph, f_out)
