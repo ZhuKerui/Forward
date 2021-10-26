@@ -5,6 +5,7 @@
 # python extract_wiki.py build_graph_from_selected
 # python extract_wiki.py build_graph_from_cooccur
 # python extract_wiki.py build_graph_from_cooccur_v2
+# python extract_wiki.py collect_cs_pages
 
 import re
 import os
@@ -41,21 +42,23 @@ keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'
 keyword_npmi_graph_file_v2 = 'data/extract_wiki/keyword_npmi_graph_v2.pickle'
 keyword_count_file = 'data/extract_wiki/keyword_count.pickle'
 
-test_path = 'data/extract_wiki/wiki_sent_test'
 w2vec_dump_file = 'data/extract_wiki/enwiki_20180420_win10_100d.pkl.bz2'
 w2vec_keyword_file = 'data/extract_wiki/w2vec_keywords.txt'
 w2vec_wordtree_file = 'data/extract_wiki/w2vec_wordtree.pickle'
 w2vec_token_file = 'data/extract_wiki/w2vec_tokens.txt'
 w2vec_keyword2idx_file = 'data/extract_wiki/w2vec_keyword2idx.pickle'
 
-# Some task specific classes
-class SentenceFilter:
-    def __init__(self, wordtree_file:str=None, token_file:str=None):
-        if wordtree_file and token_file:
-            self.co_occur_finder = CoOccurrence(wordtree_file, token_file)
-        else:
-            self.co_occur_finder = None
-        patterns = [
+cs_keyword_file = 'data/extract_wiki/cs_keyword.txt'
+cs_raw_keyword_file = 'data/extract_wiki/cs_raw_keyword.txt'
+cs_wordtree_file = 'data/extract_wiki/cs_wordtree.pickle'
+cs_token_file = 'data/extract_wiki/cs_token.txt'
+cs_pair_file = 'data/extract_wiki/cs_pair.gpickle'
+
+test_path = 'data/extract_wiki/wiki_sent_test'
+path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
+cs_path_test_file = 'data/extract_wiki/wiki_sent_test/cs_path_test.tsv'
+
+patterns = [
             'i_nsubj attr( prep pobj)*( compound){0, 1}', 
             'i_nsubj( conj)* dobj( acl prep pobj( conj)*){0,1}', 
             'i_nsubj( prep pobj)+( conj)*', 
@@ -67,6 +70,15 @@ class SentenceFilter:
             'i_dobj prep pobj( conj)*'
             # 'acl prep pobj( conj)*'
         ]
+        
+# Some task specific classes
+class SentenceFilter:
+    def __init__(self, wordtree_file:str=None, token_file:str=None):
+        if wordtree_file and token_file:
+            self.co_occur_finder = CoOccurrence(wordtree_file, token_file)
+        else:
+            self.co_occur_finder = None
+        
         self.matcher = re.compile('|'.join(patterns))
 
     def list_operation(self, sents:List[str], use_id:bool=False, keyword_only:bool=False):
@@ -279,12 +291,50 @@ def filter_keyword_by_freq(save_cooccur_file_list:list):
     return c
 
 
-def line2note(filename:str, line_idx:int):
-    return filename[len(save_path)+1:].replace('/wiki_', ':')[:-4] + ':' + str(line_idx)
+def line2note(filename:str, line_idx:int, posfix='.dat'):
+    posfix_len = len(posfix)
+    return filename[len(save_path)+1:].replace('/wiki_', ':')[:-posfix_len] + ':' + str(line_idx)
 
-def note2line(note:str):
+
+def note2line(note:str, posfix='.dat'):
     sub_folder, sub_file, line_idx = note.split(':')
-    return linecache.getline(save_path + '/' + sub_folder + '/wiki_' + sub_file + '.dat', int(line_idx))
+    return linecache.getline(save_path + '/' + sub_folder + '/wiki_' + sub_file + posfix, int(line_idx)+1)
+
+
+def get_sentence_from_page_using_keyword(wiki_file:str, keyword_file:str, save_sent_file):
+    '''
+    Collect wikipedia pages from a wiki file whose title (brackets removed) is in the keyword file
+    '''
+    paragraphs = []
+    keywords = set(my_read(keyword_file))
+    with open(wiki_file) as f_in:
+        # Remove useless lines
+        entity_name = ''
+        useful_page = False
+        for line in f_in:
+            line = line.strip()
+            if not line or line == entity_name:
+                continue
+            if re.match(r'^(<doc id=")', line):
+                entity_name = line[re.search(r'title="', line).end():re.search(r'">', line).start()]
+                # entity_id = line[9:re.search(r'" url="', line).start()]
+                keyword = remove_brackets(normalize_text(entity_name))
+                useful_page = keyword in keywords
+            elif useful_page:
+                # Process the links in the paragraph
+                links = re.findall(r'<a href="[^"]*">[^<]*</a>', line)
+                for l in links:
+                    breakpoint = l.index('">')
+                    ent = remove_brackets(unquote(l[9:breakpoint])).lower()
+                    kw = l[breakpoint+2:-4].lower()
+                    if ent[-len(kw):] == kw:
+                        line = line.replace(l, ent)
+                    else:
+                        line = line.replace(l, kw)
+                paragraphs.append(line.lower())
+    sents = batched_sent_tokenize(paragraphs)
+    sents = [normalize_text(sent) for sent in sents]
+    my_write(save_sent_file, sents)
 
 
 if __name__ == '__main__':
@@ -299,6 +349,7 @@ if __name__ == '__main__':
     wiki_files = []
     save_sent_files = []
     save_cooccur_files = []
+    save_cs_sent_files = []
     save_selected_files = []
 
     for save_dir in save_sub_folders:
@@ -310,6 +361,7 @@ if __name__ == '__main__':
         wiki_files += [os.path.join(wiki_sub_folders[i], f) for f in files]
         save_sent_files += [os.path.join(save_sub_folders[i], f+'.dat') for f in files]
         save_cooccur_files += [os.path.join(save_sub_folders[i], f+'_co.dat') for f in files]
+        save_cs_sent_files += [os.path.join(save_sub_folders[i], f+'_cs.dat') for f in files]
         save_selected_files += [os.path.join(save_sub_folders[i], f+'.tsv') for f in files]
 
     p = MyMultiProcessing(20)
@@ -371,3 +423,7 @@ if __name__ == '__main__':
         keyword_npmi_graph = build_graph_from_cooccur_v2(wikipedia_keyword_filtered_file, save_cooccur_files)
         with open(keyword_npmi_graph_file_v2, 'wb') as f_out:
             pickle.dump(keyword_npmi_graph, f_out)
+
+    elif sys.argv[1] == 'collect_cs_pages':
+        input_list = [(wiki_files[i], cs_keyword_file, save_cs_sent_files[i]) for i in range(len(wiki_files))]
+        _ = p.run(get_sentence_from_page_using_keyword, input_list)

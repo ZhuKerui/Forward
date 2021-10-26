@@ -266,7 +266,7 @@ def find_noun_phrases(doc:spacy.tokens.doc.Doc):
     return merge_noun_phrases
 
 
-def exact_match(pattern:re.Pattern, string:str):
+def exact_match(pattern:str, string:str):
     """
     Check whether the string exactly matches the re.Pattern. "Exactly" here means no extra substr is out of the pattern.
 
@@ -282,7 +282,7 @@ def exact_match(pattern:re.Pattern, string:str):
     -------
     True if the string matches the pattern exactly
     """
-    mat = pattern.match(string)
+    mat = re.compile(pattern).match(string)
     if mat is None:
         return False
     return len(string) == mat.end()
