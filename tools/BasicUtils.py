@@ -147,3 +147,8 @@ class SparseRetrieveSentForPairCoOccur:
     def retrieve(self, kw1:str, kw2:str):
         co_occur_index = self._occur_dict[kw1] & self._occur_dict[kw2]
         return [self._sents[idx] for idx in co_occur_index]
+
+
+def count_line(file:str):
+    with open(file) as f_in:
+        return len(f_in.readlines())
