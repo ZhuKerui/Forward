@@ -4,7 +4,11 @@ data/
 *__pycache__
 *.csv
 *.pt
-play_ground/
+
+play_ground/**
+!play_ground/Assignment3/
+!play_ground/Assignment3/*.ipynb
+
 *.washington_resoruce/
 *.stanfordnlp_resources/
 openie/
