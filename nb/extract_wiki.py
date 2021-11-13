@@ -1,11 +1,12 @@
 # python extract_wiki.py collect_sents
 # python extract_wiki.py collect_sents sentence_file output_file use_id[T/F] keyword_only[T/F]
-# python extract_wiki.py collect_kw_occur_from_selected
+# python extract_wiki.py collect_ent_occur_from_selected
 # python extract_wiki.py collect_kw_occur_from_sents
 # python extract_wiki.py build_graph_from_selected
 # python extract_wiki.py build_graph_from_cooccur
 # python extract_wiki.py build_graph_from_cooccur_v2
 # python extract_wiki.py collect_cs_pages
+# python extract_wiki.py collect_dataset
 
 import re
 import os
@@ -20,6 +21,7 @@ from typing import List
 from collections import Counter
 import sys
 import linecache
+import numpy as np
 sys.path.append('..')
 
 from tools.BasicUtils import MyMultiProcessing, my_read, my_write, calculate_time
@@ -32,18 +34,17 @@ wikipedia_dir = '../../data/wikipedia/full_text-2021-03-20'
 wikipedia_entity_file = 'data/extract_wiki/wikipedia_entity.tsv'
 wikipedia_entity_norm_file = 'data/extract_wiki/wikipedia_entity_norm.tsv'
 wikipedia_keyword_file = 'data/extract_wiki/keywords.txt'
-wikipedia_keyword_filtered_file = 'data/extract_wiki/keywords_f.txt'
 wikipedia_wordtree_file = 'data/extract_wiki/wordtree.pickle'
 wikipedia_token_file = 'data/extract_wiki/tokens.txt'
 save_path = 'data/extract_wiki/wiki_sent_collect'
-keyword_occur_file = 'data/extract_wiki/keyword_occur.pickle'
+entity_occur_file = 'data/extract_wiki/entity_occur.pickle'
 keyword_connection_graph_file = 'data/extract_wiki/keyword_graph.pickle'
 keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'
 keyword_npmi_graph_file_v2 = 'data/extract_wiki/keyword_npmi_graph_v2.pickle'
-keyword_count_file = 'data/extract_wiki/keyword_count.pickle'
 
 w2vec_dump_file = 'data/extract_wiki/enwiki_20180420_win10_100d.pkl.bz2'
 w2vec_keyword_file = 'data/extract_wiki/w2vec_keywords.txt'
+w2vec_entity_file = 'data/extract_wiki/w2vec_entity.txt'
 w2vec_wordtree_file = 'data/extract_wiki/w2vec_wordtree.pickle'
 w2vec_token_file = 'data/extract_wiki/w2vec_tokens.txt'
 w2vec_keyword2idx_file = 'data/extract_wiki/w2vec_keyword2idx.pickle'
@@ -58,16 +59,18 @@ test_path = 'data/extract_wiki/wiki_sent_test'
 path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
 cs_path_test_file = 'data/extract_wiki/wiki_sent_test/cs_path_test.tsv'
 
+path_pattern_count_file = 'data/extract_wiki/path_pattern.pickle'
+
 patterns = [
-            'i_nsubj attr( prep pobj)*( compound){0, 1}', 
-            'i_nsubj( conj)* dobj( acl prep pobj( conj)*){0,1}', 
-            'i_nsubj( prep pobj)+( conj)*', 
-            'i_nsubj advcl dobj( acl attr){0,1}', 
-            'appos( conj)*', 
-            'appos acl prep pobj( conj)*', 
-            'i_nsubjpass( conj)*( prep pobj)+( conj)*', 
-            'i_nsubjpass prep pobj acl dobj', 
-            'i_dobj prep pobj( conj)*'
+            r'i_nsubj attr( prep pobj)*( compound){0, 1}', 
+            r'i_nsubj( conj)* dobj( acl prep pobj( conj)*){0,1}', 
+            r'i_nsubj( prep pobj)+( conj)*', 
+            r'i_nsubj advcl dobj( acl attr){0,1}', 
+            r'appos( conj)*', 
+            r'appos acl prep pobj( conj)*', 
+            r'i_nsubjpass( conj)*( prep pobj)+( conj)*', 
+            r'i_nsubjpass prep pobj acl dobj', 
+            r'i_dobj prep pobj( conj)*'
             # 'acl prep pobj( conj)*'
         ]
         
@@ -180,24 +183,21 @@ def get_sentence(wiki_file:str, save_sent_file:str):
     my_write(save_sent_file, sents)
 
 
-def collect_kw_occur_from_selected(files:list, keyword_dict:dict):
+def collect_ent_occur_from_selected(files:list, keyword_dict:dict):
     for file in tqdm.tqdm(files):
-        file_note = file[len(save_path)+1:].replace('/wiki_', ':')[:-4]
         with open(file) as f_in:
             for i, line in enumerate(csv.reader(f_in, delimiter='\t')):
                 if i == 0:
                     continue
-                head, tail = line[1], line[4]
-                if head in keyword_dict:
-                    keyword_dict[head].add('%s:%d' % (file_note, i))
-                if tail in keyword_dict:
-                    keyword_dict[tail].add('%s:%d' % (file_note, i))
+                head, tail, idx = line[3], line[6], line[7]
+                keyword_dict[head].add(idx)
+                keyword_dict[tail].add(idx)
 
 
 @calculate_time
-def build_graph_from_cooccur(keyword_file:str, files:list):
+def build_graph_from_cooccur(entity_file:str, files:list):
     g = nx.Graph(c=0)
-    kw2idx = {kw:i for i, kw in enumerate(my_read(keyword_file))}
+    kw2idx = {kw:i for i, kw in enumerate(my_read(entity_file))}
     g.add_nodes_from(range(len(kw2idx)), c=0)
     print('Reading Co-occurrence lines')
     for file in tqdm.tqdm(files):
@@ -228,8 +228,8 @@ def build_graph_from_cooccur(keyword_file:str, files:list):
 
 
 @calculate_time
-def build_graph_from_cooccur_v2(keyword_file:str, files:list):
-    kw2idx = {kw:i for i, kw in enumerate(my_read(keyword_file))}
+def build_graph_from_cooccur_v2(entity_file:str, files:list):
+    kw2idx = {kw:i for i, kw in enumerate(my_read(entity_file))}
     g = {idx : {'C':0} for idx in range(len(kw2idx))}
     g['C'] = 0
     print('Reading Co-occurrence lines')
@@ -266,7 +266,7 @@ def build_graph_from_cooccur_v2(keyword_file:str, files:list):
     return g
 
 
-def build_graph_from_selected(save_selected_file_list:list, keyword_set):
+def build_graph_from_selected(save_selected_file_list:list):
     g = nx.Graph()
     print('Reading Co-occurrence lines')
     for f in tqdm.tqdm(save_selected_file_list):
@@ -275,20 +275,22 @@ def build_graph_from_selected(save_selected_file_list:list, keyword_set):
             for i, line in enumerate(csv_reader):
                 if i == 0:
                     continue
-                if line[1] in keyword_set and line[4] in keyword_set:
-                    g.add_edge(line[1], line[4])
+                ent1, ent2 = line[3], line[6]
+                if not g.has_node(ent1):
+                    g.add_node(ent1, c=1)
+                else:
+                    g.nodes[ent1]['c'] += 1
+
+                if not g.has_node(ent2):
+                    g.add_node(ent2, c=1)
+                else:
+                    g.nodes[ent2]['c'] += 1
+                    
+                if not g.has_edge(ent1, ent2):
+                    g.add_edge(ent1, ent2, c=1)
+                else:
+                    g.edges[ent1, ent2]['c'] += 1
     return g
-
-
-def filter_keyword_by_freq(save_cooccur_file_list:list):
-    c = Counter()
-    for file in tqdm.tqdm(save_cooccur_file_list):
-        with open(file) as f_in:
-            for line in f_in:
-                line = line.strip()
-                if line:
-                    c.update(line.split('\t'))
-    return c
 
 
 def line2note(filename:str, line_idx:int, posfix='.dat'):
@@ -337,6 +339,108 @@ def get_sentence_from_page_using_keyword(wiki_file:str, keyword_file:str, save_s
     my_write(save_sent_file, sents)
 
 
+# Basic collection, contain entities similarity, keyword name, keyword span, corresponding entity, sentence note and dep path
+basic_columns=['sim', 'kw1', 'kw1_span', 'kw1_ent', 'kw2', 'kw2_span', 'kw2_ent', 'sent', 'path']
+
+def basic_process(doc, pairs):
+    data = []
+    for item in pairs:
+        kw1_spans = find_span(doc, item['kw1'], True)
+        kw2_spans = find_span(doc, item['kw2'], True)
+        for kw1_span in kw1_spans:
+            for kw2_span in kw2_spans:
+                path = find_dependency_path_from_tree(doc, kw1_span, kw2_span)
+                if not path:
+                    continue
+                item['kw1_span'] = (kw1_span[0].i, kw1_span[-1].i)
+                item['kw2_span'] = (kw2_span[0].i, kw2_span[-1].i)
+                item['path'] = path
+                data.append(item.copy())
+    return data
+
+# Feature collection, contains subject/object full span and keyword-entity recall
+def get_compound_ahead(doc, idx):
+    while True:
+        c_list = [c for c in doc[idx].children]
+        c_dep_list = [c.dep_ for c in c_list]
+        if 'compound' in c_dep_list:
+            idx = c_list[c_dep_list.index('compound')].i
+            continue
+        return idx
+
+def get_compound_back(doc, idx):
+    while doc[idx].dep_ == 'compound':
+        idx = doc[idx].head.i
+    return idx
+
+
+def get_mod_ahead(doc, idx):
+    idx = get_compound_back(doc, idx)
+    mod_exist = True
+    while mod_exist:
+        c_list = [c for c in doc[idx].children]
+        c_dep_list = [c.dep_ for c in c_list]
+        mod_exist = False
+        for i, dep in enumerate(c_dep_list):
+            if 'mod' in dep:
+                idx_ = c_list[i].i
+                if idx_ < idx:
+                    idx = idx_
+                    mod_exist = True
+    return idx
+
+def get_consecutive_ahead(doc, idx):
+    left1 = get_compound_ahead(doc, idx)
+    left2 = get_mod_ahead(doc, idx)
+    return min(*[left1, left2, idx])
+
+feature_columns=['sim', 'kw1', 'kw1_span', 'kw1_ent', 'kw2', 'kw2_span', 'kw2_ent', 'sent', 'path', 'kw1_full_span', 'kw1_recall', 'kw2_full_span', 'kw2_recall']
+
+def feature_process(doc, pairs):
+    data = []
+    for item in pairs:
+        kw1_spans = find_span(doc, item['kw1'], True)
+        kw2_spans = find_span(doc, item['kw2'], True)
+        for kw1_span in kw1_spans:
+            for kw2_span in kw2_spans:
+                path = find_dependency_path_from_tree(doc, kw1_span, kw2_span)
+                if not path:
+                    continue
+                item['kw1_span'] = (kw1_span[0].i, kw1_span[-1].i)
+                item['kw2_span'] = (kw2_span[0].i, kw2_span[-1].i)
+                item['path'] = path
+                # Calculate subject and object coverage
+                kw1_right_most = get_compound_back(doc, kw1_span[-1].i)
+                kw1_left_most = get_consecutive_ahead(doc, kw1_span[-1].i)
+                
+                item['kw1_full_span'] = doc[kw1_left_most : kw1_right_most+1].text
+                item['kw1_recall'] = (kw1_span[-1].i - kw1_span[0].i + 1) / (kw1_right_most - kw1_left_most + 1)
+
+                kw2_right_most = get_compound_back(doc, kw2_span[-1].i)
+                kw2_left_most = get_consecutive_ahead(doc, kw2_span[-1].i)
+                
+                item['kw2_full_span'] = doc[kw2_left_most : kw2_right_most+1].text
+                item['kw2_recall'] = (kw2_span[-1].i - kw2_span[0].i + 1) / (kw2_right_most - kw2_left_most + 1)
+
+                data.append(item.copy())
+    return data
+
+
+def reverse_path(path:str):
+    path = path.split()
+    r_path = ' '.join(['i_' + token if token[:2] != 'i_' else token[2:] for token in reversed(path)])
+    return r_path
+
+def gen_pattern(path:str):
+    if 'i_nsubj' not in path:
+        path = reverse_path(path)
+    path = ' '.join([token for token in path.split() if 'appos' not in token and 'conj' not in token and 'mod' not in token])
+    return path
+
+def cal_coverage(sent:str, kw1:str, kw2:str, path:str):
+    return (len(kw1.split()) + len(kw2.split()) + len(path.split()) - 1) / len(normalize_text(sent).split())
+
+
 if __name__ == '__main__':
     # Generate the save dir
     if not os.path.exists(save_path):
@@ -362,18 +466,19 @@ if __name__ == '__main__':
         save_sent_files += [os.path.join(save_sub_folders[i], f+'.dat') for f in files]
         save_cooccur_files += [os.path.join(save_sub_folders[i], f+'_co.dat') for f in files]
         save_cs_sent_files += [os.path.join(save_sub_folders[i], f+'_cs.dat') for f in files]
-        save_selected_files += [os.path.join(save_sub_folders[i], f+'.tsv') for f in files]
+        save_selected_files += [os.path.join(save_sub_folders[i], f+'_se.dat') for f in files]
 
     p = MyMultiProcessing(20)
     if sys.argv[1] == 'collect_sents':
         if len(sys.argv) == 2:
-            sf = SentenceFilter(wikipedia_wordtree_file, wikipedia_token_file)
-            def collect_sents(save_sent_file:str, save_selected_file:str):
-                sents = my_read(save_sent_file)
-                df = sf.list_operation(sents, use_id=True, keyword_only=True)
-                df.to_csv(save_selected_file, sep='\t', index=False)
-            input_list = [(save_sent_files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
-            p.run(collect_sents, input_list=input_list)
+            # sf = SentenceFilter(wikipedia_wordtree_file, wikipedia_token_file)
+            # def collect_sents(save_sent_file:str, save_selected_file:str):
+            #     sents = my_read(save_sent_file)
+            #     df = sf.list_operation(sents, use_id=True, keyword_only=True)
+            #     df.to_csv(save_selected_file, sep='\t', index=False)
+            # input_list = [(save_sent_files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
+            # p.run(collect_sents, input_list=input_list)
+            pass
         
         elif len(sys.argv) == 6:
             file_name, output_file, use_id, keyword_only = sys.argv[2:6]
@@ -387,15 +492,15 @@ if __name__ == '__main__':
             sf.list_operation(sents=sents, use_id=use_id, keyword_only=keyword_only).to_csv(output_file, sep='\t', index=False)
 
     
-    elif sys.argv[1] == 'collect_kw_occur_from_selected':
-        keyword_occur = {kw : set() for kw in my_read(wikipedia_keyword_file)}
-        collect_kw_occur_from_selected(save_selected_files, keyword_occur)
-        with open(keyword_occur_file, 'wb') as f_out:
+    elif sys.argv[1] == 'collect_ent_occur_from_selected':
+        keyword_occur = {kw : set() for kw in my_read(w2vec_entity_file)}
+        collect_ent_occur_from_selected(save_selected_files, keyword_occur)
+        with open(entity_occur_file, 'wb') as f_out:
             pickle.dump(keyword_occur, f_out)
 
 
     elif sys.argv[1] == 'collect_kw_occur_from_sents':
-        co = CoOccurrence(wikipedia_wordtree_file, wikipedia_token_file)
+        co = CoOccurrence(w2vec_wordtree_file, w2vec_token_file)
         def collect_kw_occur_from_sents(save_sent_file:str, save_cooccur_file:str):
             sents = my_read(save_sent_file)
             cooccur_list = ['\t'.join(co.line_operation(sent_lemmatize(sent))) for sent in sents]
@@ -406,24 +511,116 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'build_graph_from_selected':
         # Load keyword occur dict which has occurance record for all keywords in selected sentences
-        with open(keyword_occur_file, 'rb') as f_in:
-            keyword_occur = pickle.load(f_in)
-        keyword_connection_graph = build_graph_from_selected(save_selected_files, keyword_occur)
+        keyword_connection_graph = build_graph_from_selected(save_selected_files)
         with open(keyword_connection_graph_file, 'wb') as f_out:
             pickle.dump(keyword_connection_graph, f_out)
 
-    elif sys.argv[1] == 'build_graph_from_cooccur':
-        # Load keyword occur dict which has occurance record for all keywords in selected sentences
-        keyword_npmi_graph = build_graph_from_cooccur(wikipedia_keyword_filtered_file, save_cooccur_files)
-        with open(keyword_npmi_graph_file, 'wb') as f_out:
-            pickle.dump(keyword_npmi_graph, f_out)
+    # elif sys.argv[1] == 'build_graph_from_cooccur':
+    #     # Load keyword occur dict which has occurance record for all keywords in selected sentences
+    #     keyword_npmi_graph = build_graph_from_cooccur(wikipedia_keyword_filtered_file, save_cooccur_files)
+    #     with open(keyword_npmi_graph_file, 'wb') as f_out:
+    #         pickle.dump(keyword_npmi_graph, f_out)
 
-    elif sys.argv[1] == 'build_graph_from_cooccur_v2':
-        # Load keyword occur dict which has occurance record for all keywords in selected sentences
-        keyword_npmi_graph = build_graph_from_cooccur_v2(wikipedia_keyword_filtered_file, save_cooccur_files)
-        with open(keyword_npmi_graph_file_v2, 'wb') as f_out:
-            pickle.dump(keyword_npmi_graph, f_out)
+    # elif sys.argv[1] == 'build_graph_from_cooccur_v2':
+    #     # Load keyword occur dict which has occurance record for all keywords in selected sentences
+    #     keyword_npmi_graph = build_graph_from_cooccur_v2(wikipedia_keyword_filtered_file, save_cooccur_files)
+    #     with open(keyword_npmi_graph_file_v2, 'wb') as f_out:
+    #         pickle.dump(keyword_npmi_graph, f_out)
 
     elif sys.argv[1] == 'collect_cs_pages':
         input_list = [(wiki_files[i], cs_keyword_file, save_cs_sent_files[i]) for i in range(len(wiki_files))]
         _ = p.run(get_sentence_from_page_using_keyword, input_list)
+
+    elif sys.argv[1] == 'collect_dataset':
+        import bz2
+        from wikipedia2vec import Wikipedia2Vec
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        with bz2.open(w2vec_dump_file) as f_in:
+            w2vec = Wikipedia2Vec.load(f_in)
+
+        with open(w2vec_keyword2idx_file, 'rb') as f_in:
+            my_mention_dict = pickle.load(f_in)
+
+        co = CoOccurrence(w2vec_wordtree_file, w2vec_token_file)
+        
+        with open(path_pattern_count_file, 'rb') as f_in:
+            c = pickle.load(f_in)
+
+        max_cnt = c.most_common(1)[0][1]
+        log_max_cnt = np.log(max_cnt+1)
+
+        def cal_freq(path:str):
+            cnt = c.get(path)
+            cnt = (cnt if cnt else 0.5) + 1
+            return np.log(cnt) / log_max_cnt
+
+        def collect_paths_in_bg(test_file:str, process_func, columns:list, posfix:str='.dat'):
+            # Build test data
+            with open(test_file) as f_in:
+                data = []
+                for line_idx, line in enumerate(f_in.readlines()):
+                    sent_note = line2note(test_file, line_idx, posfix=posfix)
+                    line = line.strip()
+                    co_kws = list(co.line_operation(sent_lemmatize(line)))
+                    if len(co_kws) < 2:
+                        continue
+                    certain_ent_list = []
+                    certain_ent_kw_list = []
+                    uncertain_ent_list = []
+                    uncertain_ent_kw_list = []
+                    for kw in co_kws:
+                        idxs = my_mention_dict[kw]
+                        if len(idxs) == 1:
+                            certain_ent_kw_list.append(kw)
+                            certain_ent_list.append(w2vec.dictionary.get_entity_by_index(idxs[0]))
+                        else:
+                            uncertain_ent_kw_list.append(kw)
+                            uncertain_ent_list.append([w2vec.dictionary.get_entity_by_index(idx) for idx in idxs])
+                    
+                    certain_ent_matrix = np.array([w2vec.get_vector(ent) for ent in certain_ent_list])
+                    uncertain_ent_matrix_list = [np.array([w2vec.get_vector(ent) for ent in ent_list]) for ent_list in uncertain_ent_list]
+                    pairs = []
+                    certain_len = len(certain_ent_list)
+                    uncertain_len = len(uncertain_ent_list)
+                    if certain_len >= 1:
+                        # Collect pairs between certain entities
+                        result = cosine_similarity(certain_ent_matrix, certain_ent_matrix) - np.identity(certain_len)
+                        for i in range(certain_len):
+                            for j in range(i+1, certain_len):
+                                pairs.append({'kw1':certain_ent_kw_list[i], 'kw2':certain_ent_kw_list[j], 'sim':float(result[i, j]), 'sent':sent_note, 
+                                    'kw1_ent':certain_ent_list[i].title, 
+                                    'kw2_ent':certain_ent_list[j].title})
+                        # Collect pairs between certain and uncertain entities
+                        for i in range(uncertain_len):
+                            result = cosine_similarity(certain_ent_matrix, uncertain_ent_matrix_list[i])
+                            for j in range(certain_len):
+                                idx = np.argmax(result[j])
+                                pairs.append({'kw1':uncertain_ent_kw_list[i], 'kw2':certain_ent_kw_list[j], 'sim':float(result[j, idx]), 'sent':sent_note, 
+                                    'kw1_ent':uncertain_ent_list[i][idx].title, 
+                                    'kw2_ent':certain_ent_list[j].title})
+                    if uncertain_len >= 2:
+                        # Collect pairs between uncertain entities
+                        for i in range(uncertain_len):
+                            for j in range(i+1, uncertain_len):
+                                result = cosine_similarity(uncertain_ent_matrix_list[i], uncertain_ent_matrix_list[j])
+                                idx = np.argmax(result)
+                                row = int(idx / result.shape[1])
+                                col = idx % result.shape[1]
+                                pairs.append({'kw1':uncertain_ent_kw_list[i], 'kw2':uncertain_ent_kw_list[j], 'sim':float(result[row, col]), 'sent':sent_note, 
+                                    'kw1_ent':uncertain_ent_list[i][row].title, 
+                                    'kw2_ent':uncertain_ent_list[j][col].title})
+                    pairs = [item for item in pairs if item['sim'] > 0.5]
+                    if pairs:
+                        doc = nlp(line)
+                        for item in process_func(doc, pairs):
+                            item['pattern'] = gen_pattern(item['path'])
+                            item['pattern_freq'] = cal_freq(item['pattern'])
+                            item['coverage'] = cal_coverage(line, item['kw1'], item['kw2'], item['path'])
+                            item['score'] = (item['pattern_freq'] * (item['kw1_recall'] + item['kw2_recall']) / 2 * item['coverage'])**0.33
+                            if item['score'] > 0.5:
+                                data.append(item)
+                pd.DataFrame(data=data, columns=columns).to_csv(test_file[:-len(posfix)]+'_se'+posfix, sep='\t', index=False)
+
+        input_list = [(file, feature_process, feature_columns + ['pattern', 'pattern_freq', 'coverage', 'score']) for file in save_sent_files]
+        _ = p.run(collect_paths_in_bg, input_list)
