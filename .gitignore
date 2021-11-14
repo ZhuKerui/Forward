@@ -8,6 +8,7 @@ data/
 play_ground/**
 !play_ground/Assignment3/
 !play_ground/Assignment3/*.ipynb
+!play_ground/Assignment3/*.py
 
 *.washington_resoruce/
 *.stanfordnlp_resources/
