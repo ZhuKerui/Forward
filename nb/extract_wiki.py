@@ -7,6 +7,7 @@
 # python extract_wiki.py build_graph_from_cooccur_v2
 # python extract_wiki.py collect_cs_pages
 # python extract_wiki.py collect_dataset
+# python extract_wiki.py generate_graph
 
 import re
 import os
@@ -38,9 +39,10 @@ wikipedia_wordtree_file = 'data/extract_wiki/wordtree.pickle'
 wikipedia_token_file = 'data/extract_wiki/tokens.txt'
 save_path = 'data/extract_wiki/wiki_sent_collect'
 entity_occur_file = 'data/extract_wiki/entity_occur.pickle'
-keyword_connection_graph_file = 'data/extract_wiki/keyword_graph.pickle'
-keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'
-keyword_npmi_graph_file_v2 = 'data/extract_wiki/keyword_npmi_graph_v2.pickle'
+keyword_connection_graph_file = 'data/extract_wiki/keyword_graph.pickle' # deprecated
+keyword_npmi_graph_file = 'data/extract_wiki/keyword_npmi_graph.pickle'  # deprecated
+keyword_npmi_graph_file_v2 = 'data/extract_wiki/keyword_npmi_graph_v2.pickle' # deprecated
+graph_file = 'data/extract_wiki/graph.pickle'
 
 w2vec_dump_file = 'data/extract_wiki/enwiki_20180420_win10_100d.pkl.bz2'
 w2vec_keyword_file = 'data/extract_wiki/w2vec_keywords.txt'
@@ -190,6 +192,7 @@ def collect_ent_occur_from_selected(files:list, keyword_dict:dict):
                 if i == 0:
                     continue
                 head, tail, idx = line[3], line[6], line[7]
+                idx = '%s:%d' % (idx.rsplit(':', 1)[0], i)
                 keyword_dict[head].add(idx)
                 keyword_dict[tail].add(idx)
 
@@ -293,6 +296,25 @@ def build_graph_from_selected(save_selected_file_list:list):
     return g
 
 
+def generate_graph(files:list):
+    g = nx.Graph()
+    for file in tqdm.tqdm(files):
+        with open(file) as f_in:
+            for i, record in enumerate(f_in):
+                if i == 0:
+                    continue
+                record = record.strip().split('\t')
+                if not g.has_edge(record[3], record[6]):
+                    g.add_edge(record[3], record[6], score=float(record[-1]), sent=record[7])
+                else:
+                    data = g.get_edge_data(record[3], record[6])
+                    new_score = float(record[-1])
+                    if data['score'] < new_score:
+                        data['score'] = new_score
+                        data['sent'] = record[7]
+    return g
+
+
 def line2note(filename:str, line_idx:int, posfix='.dat'):
     posfix_len = len(posfix)
     return filename[len(save_path)+1:].replace('/wiki_', ':')[:-posfix_len] + ':' + str(line_idx)
@@ -359,40 +381,25 @@ def basic_process(doc, pairs):
     return data
 
 # Feature collection, contains subject/object full span and keyword-entity recall
-def get_compound_ahead(doc, idx):
-    while True:
-        c_list = [c for c in doc[idx].children]
-        c_dep_list = [c.dep_ for c in c_list]
-        if 'compound' in c_dep_list:
-            idx = c_list[c_dep_list.index('compound')].i
-            continue
-        return idx
-
-def get_compound_back(doc, idx):
-    while doc[idx].dep_ == 'compound':
+def get_back(doc, idx):
+    while doc[idx].dep_ == 'compound' or doc[idx].dep_ == 'amod':
         idx = doc[idx].head.i
     return idx
 
 
-def get_mod_ahead(doc, idx):
-    idx = get_compound_back(doc, idx)
+def get_ahead(doc, idx):
     mod_exist = True
     while mod_exist:
         c_list = [c for c in doc[idx].children]
         c_dep_list = [c.dep_ for c in c_list]
         mod_exist = False
         for i, dep in enumerate(c_dep_list):
-            if 'mod' in dep:
+            if 'amod' == dep or 'compound' == dep:
                 idx_ = c_list[i].i
                 if idx_ < idx:
                     idx = idx_
                     mod_exist = True
     return idx
-
-def get_consecutive_ahead(doc, idx):
-    left1 = get_compound_ahead(doc, idx)
-    left2 = get_mod_ahead(doc, idx)
-    return min(*[left1, left2, idx])
 
 feature_columns=['sim', 'kw1', 'kw1_span', 'kw1_ent', 'kw2', 'kw2_span', 'kw2_ent', 'sent', 'path', 'kw1_full_span', 'kw1_recall', 'kw2_full_span', 'kw2_recall']
 
@@ -401,6 +408,9 @@ def feature_process(doc, pairs):
     for item in pairs:
         kw1_spans = find_span(doc, item['kw1'], True)
         kw2_spans = find_span(doc, item['kw2'], True)
+        kw1_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item['kw1']).split())
+        kw2_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item['kw2']).split())
+        
         for kw1_span in kw1_spans:
             for kw2_span in kw2_spans:
                 path = find_dependency_path_from_tree(doc, kw1_span, kw2_span)
@@ -410,17 +420,19 @@ def feature_process(doc, pairs):
                 item['kw2_span'] = (kw2_span[0].i, kw2_span[-1].i)
                 item['path'] = path
                 # Calculate subject and object coverage
-                kw1_right_most = get_compound_back(doc, kw1_span[-1].i)
-                kw1_left_most = get_consecutive_ahead(doc, kw1_span[-1].i)
+                kw1_right_most = get_back(doc, kw1_span[-1].i)
+                kw1_left_most = min(get_ahead(doc, kw1_right_most), get_ahead(doc, kw1_span[0].i), kw1_span[0].i)
                 
-                item['kw1_full_span'] = doc[kw1_left_most : kw1_right_most+1].text
-                item['kw1_recall'] = (kw1_span[-1].i - kw1_span[0].i + 1) / (kw1_right_most - kw1_left_most + 1)
+                const_num = 0.5
+                
+                item['kw1_full_span'] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw1_left_most : kw1_right_most+1].text).split())
+                item['kw1_recall'] = np.log(kw1_clean.count(' ') + 1 + const_num) / np.log(item['kw1_full_span'].count(' ') + 1 + const_num)
 
-                kw2_right_most = get_compound_back(doc, kw2_span[-1].i)
-                kw2_left_most = get_consecutive_ahead(doc, kw2_span[-1].i)
+                kw2_right_most = get_back(doc, kw2_span[-1].i)
+                kw2_left_most = min(get_ahead(doc, kw2_right_most), get_ahead(doc, kw2_span[0].i), kw2_span[0].i)
                 
-                item['kw2_full_span'] = doc[kw2_left_most : kw2_right_most+1].text
-                item['kw2_recall'] = (kw2_span[-1].i - kw2_span[0].i + 1) / (kw2_right_most - kw2_left_most + 1)
+                item['kw2_full_span'] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw2_left_most : kw2_right_most+1].text).split())
+                item['kw2_recall'] = np.log(kw2_clean.count(' ') + 1 + const_num) / np.log(item['kw2_full_span'].count(' ') + 1 + const_num)
 
                 data.append(item.copy())
     return data
@@ -434,7 +446,7 @@ def reverse_path(path:str):
 def gen_pattern(path:str):
     if 'i_nsubj' not in path:
         path = reverse_path(path)
-    path = ' '.join([token for token in path.split() if 'appos' not in token and 'conj' not in token and 'mod' not in token])
+    path = ' '.join([token for token in path.split() if 'appos' not in token and 'conj' not in token])
     return path
 
 def cal_coverage(sent:str, kw1:str, kw2:str, path:str):
@@ -514,6 +526,12 @@ if __name__ == '__main__':
         keyword_connection_graph = build_graph_from_selected(save_selected_files)
         with open(keyword_connection_graph_file, 'wb') as f_out:
             pickle.dump(keyword_connection_graph, f_out)
+            
+    elif sys.argv[1] == 'generate_graph':
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        graph = generate_graph(save_selected_files)
+        with open(graph_file, 'wb') as f_out:
+            pickle.dump(graph, f_out)
 
     # elif sys.argv[1] == 'build_graph_from_cooccur':
     #     # Load keyword occur dict which has occurance record for all keywords in selected sentences
