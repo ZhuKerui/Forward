@@ -48,7 +48,7 @@ ds['test'] = test_df
 ds.save_to_disk(dataset_dir)
 
 def tokenize_function(examples):
-    ret = tokenizer(examples['source'], padding='max_length', max_length=800, truncation=True)
+    ret = tokenizer(examples['source'], padding='max_length', max_length=700, truncation=True)
     with tokenizer.as_target_tokenizer():
         ret['labels'] = tokenizer(examples['summary'], padding='max_length', max_length=150, truncation=True)['input_ids']
     return ret
