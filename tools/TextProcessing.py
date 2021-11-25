@@ -118,62 +118,85 @@ def build_word_tree(input_txt:str, dump_file:str, entity_file:str):
     with open(dump_file, 'w', encoding='utf-8') as output_file:
         json.dump(MyTree, output_file)
     my_write(entity_file, entities)
+
+
+def build_word_tree_v2(input_list, dump_file:str='', token_file:str='', old_MyTree:dict=None, old_token2idx:dict=None):
+    if old_MyTree is not None and old_token2idx is not None:
+        MyTree = old_MyTree
+        token2idx = old_token2idx
+        token_idx = max([v for k, v in token2idx.items()]) + 1
+    else:
+        MyTree = {}
+        token2idx = {}
+        token_idx = 0
         
-@calculate_time
-def build_word_tree_v2(input_txt:str, dump_file:str, token_file:str):
-    MyTree = {}
-    with open(input_txt, 'r', encoding='utf-8') as load_file:
-        keywords_str = load_file.read().strip()
-        token_list = list(set(keywords_str.split()))
-        token2idx = {token:i for i, token in enumerate(token_list)}
-        print('transform keywords into index')
-        keywords = keywords_str.splitlines()
-        keywords_idx = [[token2idx[token] for token in kw.split()] for kw in tqdm.tqdm(keywords)]
-        print('start building wordtree')
-        for i, word in enumerate(tqdm.tqdm(keywords_idx)):
-            if not word:
-                print('Bad word at line', i, keywords[i])
-                return
-            # Insert the keyword to the tree structure
-            if len(word) == 1:
-                # If the word is an atomic word instead of a phrase
-                if word[0] not in MyTree:
-                    # If this is the first time that this word is inserted to the tree
-                    MyTree[word[0]] = {-1:-1}
-                elif -1 not in MyTree[word[0]]:
-                    # If the word has been inserted but is viewed as an atomic word the first time
-                    MyTree[word[0]][-1] = -1
-                # If the word has already been inserted as an atomic word, then we do nothing
-            else:
-                # If the word is an phrase
-                length = len(word)
-                fw = word[0]
-                if fw not in MyTree:
-                    MyTree[fw] = {}
-                temp_dict = MyTree
-                parent_node = fw
-                for i in range(1, length):
-                    if word[i]:
-                        sw = word[i]
-                        if sw not in temp_dict[parent_node]:
-                            # The second word is inserted to as the child of parent node the first time
-                            temp_dict[parent_node][sw] = {}
-                        if i == length - 1:
-                            # If the second word is the last word in the phrase
-                            if -1 not in temp_dict[parent_node][sw]:
-                                temp_dict[parent_node][sw][-1] = -1
-                        else:
-                            # If the second word is not the last word in the phrase
-                            temp_dict = temp_dict[parent_node]
-                            parent_node = sw
+    if type(input_list) == str:
+        with open(input_list, 'r', encoding='utf-8') as load_file:
+            keywords_str = load_file.read().strip()
+            # transform keywords into index
+            keywords = keywords_str.splitlines()
+    elif type(input_list) == list:
+        keywords = input_list
+    else:
+        return
+    
+    for kw in keywords:
+        for token in kw.split():
+            if token not in token2idx:
+                token2idx[token] = token_idx
+                token_idx += 1
+    keywords_idx = [[token2idx[token] for token in kw.split()] for kw in keywords]
+    # start building wordtree
+    for word in keywords_idx:
+        if not word:
+            print('Bad word in', keywords)
+            return
+        # Insert the keyword to the tree structure
+        if len(word) == 1:
+            # If the word is an atomic word instead of a phrase
+            if word[0] not in MyTree:
+                # If this is the first time that this word is inserted to the tree
+                MyTree[word[0]] = {-1:-1}
+            elif -1 not in MyTree[word[0]]:
+                # If the word has been inserted but is viewed as an atomic word the first time
+                MyTree[word[0]][-1] = -1
+            # If the word has already been inserted as an atomic word, then we do nothing
+        else:
+            # If the word is an phrase
+            length = len(word)
+            fw = word[0]
+            if fw not in MyTree:
+                MyTree[fw] = {}
+            temp_dict = MyTree
+            parent_node = fw
+            for i in range(1, length):
+                sw = word[i]
+                if sw not in temp_dict[parent_node]:
+                    # The second word is inserted to as the child of parent node the first time
+                    temp_dict[parent_node][sw] = {}
+                if i == length - 1:
+                    # If the second word is the last word in the phrase
+                    if -1 not in temp_dict[parent_node][sw]:
+                        temp_dict[parent_node][sw][-1] = -1
+                else:
+                    # If the second word is not the last word in the phrase
+                    temp_dict = temp_dict[parent_node]
+                    parent_node = sw
+    if dump_file:
         print('Building word tree is accomplished with %d words added' % (len(keywords)))
         with open(dump_file, 'wb') as output_file:
             pickle.dump(MyTree, output_file)
-        my_write(token_file, token_list)
+    if token_file:
+        with open(token_file, 'wb') as output_file:
+            pickle.dump(token2idx, output_file)
+        
+    return MyTree, token2idx
 
 
-def sent_lemmatize(sentence:str):
-    return [str(wnl.lemmatize(word, pos='n') if tag.startswith('NN') else word) for word, tag in pos_tag(word_tokenize(sentence))]
+def sent_lemmatize(sentence):
+    if type(sentence) == str:
+        sentence = word_tokenize(sentence)
+    return [str(wnl.lemmatize(word, pos='n') if tag.startswith('NN') else word) for word, tag in pos_tag(sentence)]
 
 def batched_sent_tokenize(paragraphs:list):
     content = []
@@ -181,9 +204,18 @@ def batched_sent_tokenize(paragraphs:list):
         content += sent_tokenize(para)
     return content
 
+def find_root_in_span(kw:spacy.tokens.span.Span):
+    span_front = kw[0].i
+    span_back = kw[-1].i
+    root = kw[-1]
+    while root.head.i >= span_front and root.head.i <= span_back and root.head.i != root.i:
+        root = root.head
+    return root.i
+
 def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.tokens.span.Span):
-    idx1 = kw1[-1].i
-    idx2 = kw2[-1].i
+    # Find roots of the spans
+    idx1 = find_root_in_span(kw1)
+    idx2 = find_root_in_span(kw2)
     branch = np.zeros(len(doc))
     i = idx1
     while branch[i] == 0:
