@@ -60,10 +60,20 @@ class CoOccurrence:
     """
     Find all the keywords that occur in the list of str.
     """
-    def __init__(self, wordtree_file:str, token_file:str):
-        with open(wordtree_file, 'rb') as f_in:
-            self.wordtree = pickle.load(f_in)
-        self.token2idx = {token.strip() : i for i, token in enumerate(open(token_file))}
+    def __init__(self, wordtree, tokens):
+        """Help finding phrases in the sentence
+
+        Args:
+            wordtree (str/dict): [description]
+            tokens (str/dict): [description]
+        """
+        if type(wordtree) == str and type(tokens) == str:
+            with open(wordtree, 'rb') as f_in:
+                self.wordtree = pickle.load(f_in)
+            self.token2idx = {token.strip() : i for i, token in enumerate(open(tokens))}
+        elif type(wordtree) == dict and type(tokens) == dict:
+            self.wordtree = wordtree
+            self.token2idx = tokens
 
     def line_operation(self, reformed_sent:list, greedy:bool=False):
         i = 0

@@ -151,4 +151,4 @@ class SparseRetrieveSentForPairCoOccur:
 
 def count_line(file:str):
     with open(file) as f_in:
-        return len(f_in.readlines())
+        return len(f_in.read().split('\n'))
