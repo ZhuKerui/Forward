@@ -22,7 +22,7 @@ from nltk import word_tokenize
 sys.path.append('..')
 
 from tools.BasicUtils import MyMultiProcessing, my_read, my_write
-from tools.TextProcessing import (remove_brackets, batched_sent_tokenize, 
+from tools.TextProcessing import (remove_brackets,
                                   nlp, find_span, sent_lemmatize, find_dependency_path_from_tree,
                                   build_word_tree_v2)
 from tools.DocProcessing import CoOccurrence
@@ -51,6 +51,7 @@ test_path = 'data/extract_wiki/wiki_sent_test'
 path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
 
 path_pattern_count_file = 'data/extract_wiki/path_pattern.pickle'
+wikipedia_entity_low2orig_map_file = 'data/extract_wiki/wikipedia_entity_low2orig_map.pickle'
 
 sub_folders = [sub for sub in os.listdir(wikipedia_dir)]
 save_sub_folders = [os.path.join(save_path, sub) for sub in sub_folders]
@@ -87,6 +88,29 @@ patterns = [
             # 'acl prep pobj( conj)*'
         ]
         
+# Some private variables
+__const_num = 0.5
+__kw1 = 'kw1'
+__kw2 = 'kw2'
+__kw1_ent = 'kw1_ent'
+__kw2_ent = 'kw2_ent'
+__sent = 'sent'
+__kw1_span = 'kw1_span'
+__kw2_span = 'kw2_span'
+__dep_path = 'dep_path'
+__kw1_full_span = 'kw1_full_span'
+__kw1_recall = 'kw1_recall'
+__kw2_full_span = 'kw2_full_span'
+__kw2_recall = 'kw2_recall'
+__dep_coverage = 'dep_coverage'
+__surface_coverage = 'surface_coverage'
+__sim = 'sim'
+__pattern = 'pattern'
+__pattern_freq = 'pattern_freq'
+__score = 'score'
+__similar_threshold = 0.4
+__score_threshold = 0.5
+
 # Some task specific classes
 
 
@@ -188,40 +212,41 @@ def get_ahead(doc, idx):
                     mod_exist = True
     return idx
 
-feature_columns=['sim', 'kw1', 'kw1_span', 'kw1_ent', 'kw2', 'kw2_span', 'kw2_ent', 'sent', 'path', 'kw1_full_span', 'kw1_recall', 'kw2_full_span', 'kw2_recall', 'coverage']
+feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
 
 def feature_process(doc, pairs):
     data = []
     for item in pairs:
-        kw1_spans = find_span(doc, item['kw1'], True)
-        kw2_spans = find_span(doc, item['kw2'], True)
-        kw1_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item['kw1']).split())
-        kw2_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item['kw2']).split())
+        kw1_spans = find_span(doc, item[__kw1], True)
+        kw2_spans = find_span(doc, item[__kw2], True)
+        kw1_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item[__kw1]).split())
+        kw2_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item[__kw2]).split())
         
         for kw1_span in kw1_spans:
             for kw2_span in kw2_spans:
-                path = find_dependency_path_from_tree(doc, kw1_span, kw2_span)
-                if not path:
-                    continue
-                item['kw1_span'] = (kw1_span[0].i, kw1_span[-1].i)
-                item['kw2_span'] = (kw2_span[0].i, kw2_span[-1].i)
-                item['path'] = path
+                
+                item[__kw1_span] = (kw1_span[0].i, kw1_span[-1].i)
+                item[__kw2_span] = (kw2_span[0].i, kw2_span[-1].i)
+                
                 # Calculate subject and object coverage
                 kw1_right_most = get_back(doc, kw1_span[-1].i)
                 kw1_left_most = min(get_ahead(doc, kw1_right_most), get_ahead(doc, kw1_span[0].i), kw1_span[0].i)
                 
-                const_num = 0.5
-                
-                item['kw1_full_span'] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw1_left_most : kw1_right_most+1].text).split())
-                item['kw1_recall'] = np.log(kw1_clean.count(' ') + 1 + const_num) / np.log(item['kw1_full_span'].count(' ') + 1 + const_num)
+                item[__kw1_full_span] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw1_left_most : kw1_right_most+1].text).split())
+                item[__kw1_recall] = np.log(kw1_clean.count(' ') + 1 + __const_num) / np.log(item[__kw1_full_span].count(' ') + 1 + __const_num)
 
                 kw2_right_most = get_back(doc, kw2_span[-1].i)
                 kw2_left_most = min(get_ahead(doc, kw2_right_most), get_ahead(doc, kw2_span[0].i), kw2_span[0].i)
                 
-                item['kw2_full_span'] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw2_left_most : kw2_right_most+1].text).split())
-                item['kw2_recall'] = np.log(kw2_clean.count(' ') + 1 + const_num) / np.log(item['kw2_full_span'].count(' ') + 1 + const_num)
+                item[__kw2_full_span] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw2_left_most : kw2_right_most+1].text).split())
+                item[__kw2_recall] = np.log(kw2_clean.count(' ') + 1 + __const_num) / np.log(item[__kw2_full_span].count(' ') + 1 + __const_num)
                 
-                item['coverage'] = (len(kw1_span) + len(kw2_span) + len(path.split()) - 1) / len(doc)
+                path = find_dependency_path_from_tree(doc, doc[kw1_left_most : kw1_right_most + 1], doc[kw2_left_most : kw2_right_most + 1])
+                if not path:
+                    continue
+                item[__dep_path] = path
+                item[__dep_coverage] = ((kw1_right_most - kw1_left_most + 1) + (kw2_right_most - kw2_left_most + 1) + len(path.split()) - 1) / len(doc)
+                item[__surface_coverage] = max(kw1_right_most - kw2_left_most + 1, kw2_right_most - kw1_left_most + 1) / len(doc)
 
                 data.append(item.copy())
     return data
@@ -235,25 +260,45 @@ def reverse_path(path:str):
 def gen_pattern(path:str):
     if 'i_nsubj' not in path:
         path = reverse_path(path)
-    path = ' '.join([token for token in path.split() if 'appos' not in token and 'conj' not in token])
-    return path
+    path = path.split()
+    path_ = []
+    # Check for 'prep prep'
+    for token_idx, token in enumerate(path):
+        if 'appos' in token or 'conj' in token:
+            continue
+        if token_idx > 0:
+            if token == 'prep' and path[token_idx - 1] == 'prep':
+                continue
+        path_.append(token)
+    return ' '.join(path_)
 
 
-def process_line(sent:str, ents:list, process_func, w2vec:Wikipedia2Vec, sent_note:str):
-    co_kws = [gen_kw_from_wiki_ent(ent) for ent in ents]
-    matrix = np.array([w2vec.get_entity_vector(ent) for ent in ents])
+def process_line(sent:str, ents:list, w2vec:Wikipedia2Vec, sent_note:str):
+    co_kws = []
+    matrix = []
+    for ent in ents:
+        try:
+            vec = w2vec.get_entity_vector(ent)
+            matrix.append(vec)
+            co_kws.append(gen_kw_from_wiki_ent(ent))
+        except:
+            pass
+    certain_len = len(co_kws)
+    if certain_len <= 1:
+        return []
+    
     pairs = []
-    certain_len = len(ents)
     # Collect pairs between certain entities
+    matrix = np.array(matrix)
     result = cosine_similarity(matrix, matrix)
     for i in range(certain_len):
         for j in range(i+1, certain_len):
-            pairs.append({'kw1':co_kws[i], 'kw2':co_kws[j], 'sim':float(result[i, j]), 'sent':sent_note, 'kw1_ent':ents[i], 'kw2_ent':ents[j]})
+            pairs.append({__kw1:co_kws[i], __kw2:co_kws[j], __sim:float(result[i, j]), __sent:sent_note, __kw1_ent:ents[i], __kw2_ent:ents[j]})
     doc = nlp(sent)
-    return process_func(doc, pairs)
+    return feature_process(doc, pairs)
     
     
-def process_file(save_sent_file:str, save_cooccur__file:str, process_func, w2vec:Wikipedia2Vec, posfix:str='.dat'):
+def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec, posfix:str='.dat'):
     # Build test data
     with open(save_sent_file) as f_in:
         sents = f_in.read().split('\n')
@@ -265,33 +310,49 @@ def process_file(save_sent_file:str, save_cooccur__file:str, process_func, w2vec
         if len(line) <= 1:
             continue
         sent_note = line2note(save_sent_file, line_idx, posfix=posfix)
-        data += process_line(sents[line_idx], line, process_func, w2vec, sent_note)
+        data += process_line(sents[line_idx], line, w2vec, sent_note)
     return data
 
 
-def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, coverage:float):
-    return (pattern_freq * (kw1_recall + kw2_recall) / 2 * coverage)**0.333
+def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, dep_coverage:float, surface_coverage:float):
+    return ((pattern_freq)**0.3) * (((kw1_recall + kw2_recall) / 2)**0.35) * (((dep_coverage + surface_coverage) / 2)**0.35)
 
 
 def filter_path_from_df(df:pd.DataFrame, cal_freq):
-    sub_df = df[df['sim'] >= 0.5]
-    sub_df = sub_df.assign(pattern = sub_df.apply(lambda x: gen_pattern(x['path']), axis=1))
-    sub_df = sub_df.assign(pattern_freq = sub_df.apply(lambda x: cal_freq(x['pattern']), axis=1))
-    sub_df = sub_df.assign(score = sub_df.apply(lambda x: cal_score(x['pattern_freq'], x['kw1_recall'], x['kw2_recall'], x['coverage']), axis=1))
-    sub_df = sub_df[sub_df['score'] > 0.5]
+    sub_df = df[df[__sim] >= __similar_threshold]
+    sub_df = sub_df.assign(pattern = sub_df.apply(lambda x: gen_pattern(x[__dep_path]), axis=1))
+    sub_df = sub_df.assign(pattern_freq = sub_df.apply(lambda x: cal_freq(x[__pattern]), axis=1))
+    sub_df = sub_df.assign(score = sub_df.apply(lambda x: cal_score(x[__pattern_freq], x[__kw1_recall], x[__kw2_recall], x[__dep_coverage], x[__surface_coverage]), axis=1))
+    sub_df = sub_df[sub_df[__score] > __score_threshold]
     return sub_df
 
 def filter_path_from_list(pairs:list, cal_freq):
     data = []
     for item in pairs:
-        if item['sim'] < 0.5:
+        if item[__sim] < __similar_threshold:
             continue
-        item['pattern'] = gen_pattern(item['path'])
-        item['pattern_freq'] = cal_freq(item['pattern'])
-        item['score'] = cal_score(item['pattern_freq'], item['kw1_recall'], item['kw2_recall'], item['coverage'])
-        if item['score'] > 0.5:
+        item[__pattern] = gen_pattern(item[__dep_path])
+        item[__pattern_freq] = cal_freq(item[__pattern])
+        item[__score] = cal_score(item[__pattern_freq], item[__kw1_recall], item[__kw2_recall], item[__dep_coverage], item[__surface_coverage])
+        if item[__score] > __score_threshold:
             data.append(item)
     return data
+
+
+def get_entity_page(ent:str):
+    lines = []
+    for f in save_title_files:
+        found = False
+        with open(f) as f_in:
+            for line_idx, line in enumerate(f_in):
+                if line.strip() == ent:
+                    if not found:
+                        found = True
+                    lines.append(line2note(f, line_idx, '_ti.dat'))
+                else:
+                    if found:
+                        return lines
+    return []
 
 if __name__ == '__main__':
     # Generate the save dir
@@ -324,10 +385,10 @@ if __name__ == '__main__':
             cnt = (cnt if cnt else 0.5) + 1
             return np.log(cnt) / log_max_cnt
         
-        def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, process_func, columns:list, posfix:str='.dat'):
-            pd.DataFrame(filter_path_from_list(process_file(save_sent_file, save_cooccur__file, process_func, w2vec, posfix), cal_freq)).to_csv(save_selected_file, columns=columns, sep='\t', index=False)
+        def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, columns:list, posfix:str='.dat'):
+            pd.DataFrame(filter_path_from_list(process_file(save_sent_file, save_cooccur__file, w2vec, posfix), cal_freq)).to_csv(save_selected_file, columns=columns, sep='\t', index=False)
 
-        input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i], feature_process, feature_columns + ['pattern', 'pattern_freq', 'score']) for i in range(len(save_sent_files))]
+        input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i], feature_columns + [__pattern, __pattern_freq, __score]) for i in range(len(save_sent_files))]
         _ = p.run(collect_dataset, input_list)
         
         
