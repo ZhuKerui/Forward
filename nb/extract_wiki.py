@@ -2,6 +2,7 @@
 # python extract_wiki.py collect_dataset
 # python extract_wiki.py generate_graph
 # python extract_wiki.py collect_ent_occur_from_selected
+# python extract_wiki.py generate_single_sent_graph
 
 import re
 import os
@@ -38,6 +39,7 @@ wikipedia_token_file = 'data/extract_wiki/tokens.txt'
 save_path = 'data/extract_wiki/wiki_sent_collect'
 entity_occur_file = 'data/extract_wiki/entity_occur.pickle'
 graph_file = 'data/extract_wiki/graph.pickle'
+single_sent_graph_file = 'data/extract_wiki/single_sent_graph.pickle'
 
 w2vec_dump_file = 'data/extract_wiki/enwiki_20180420_win10_100d.pkl.bz2'
 w2vec_keyword_file = 'data/extract_wiki/w2vec_keywords.txt'
@@ -317,6 +319,7 @@ def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec
 def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, dep_coverage:float, surface_coverage:float):
     return ((pattern_freq)**0.3) * (((kw1_recall + kw2_recall) / 2)**0.35) * (((dep_coverage + surface_coverage) / 2)**0.35)
 
+record_columns = feature_columns + [__pattern, __pattern_freq, __score]
 
 def filter_path_from_df(df:pd.DataFrame, cal_freq):
     sub_df = df[df[__sim] >= __similar_threshold]
@@ -416,6 +419,29 @@ if __name__ == '__main__':
         graph = generate_graph(save_selected_files, 0.55)
         with open(graph_file, 'wb') as f_out:
             pickle.dump(graph, f_out)
+            
+            
+    elif sys.argv[1] == 'generate_single_sent_graph':
+        
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        def generate_single_sent_graph(graph:nx.Graph):
+            single_sent_g = nx.Graph()
+            for edge in tqdm.tqdm(graph.edges):
+                data = graph.get_edge_data(*edge)['data']
+                best_score, best_note = data[0]
+                for score, note in data:
+                    if score > best_score:
+                        best_score = score
+                        best_note = note
+                single_sent_g.add_edge(*edge, score=best_score, note=best_note)
+            return single_sent_g
+
+        with open(graph_file, 'rb') as f_in:
+            graph = pickle.load(f_in)
+            
+        single_sent_g = generate_single_sent_graph(graph)
+        with open(single_sent_graph_file, 'wb') as f_out:
+            pickle.dump(single_sent_g, f_out)
         
         
     elif sys.argv[1] == 'collect_ent_occur_from_selected':
@@ -427,11 +453,15 @@ if __name__ == '__main__':
                         if i == 0:
                             continue
                         head, tail, idx = line[3], line[6], line[7]
+                        if head not in keyword_dict:
+                            keyword_dict[head] = set()
+                        if tail not in keyword_dict:
+                            keyword_dict[tail] = set()
                         idx = '%s:%d' % (idx.rsplit(':', 1)[0], i)
                         keyword_dict[head].add(idx)
                         keyword_dict[tail].add(idx)
                 
-        keyword_occur = {kw : set() for kw in my_read(w2vec_entity_file)}
+        keyword_occur = {}
         collect_ent_occur_from_selected(save_selected_files, keyword_occur)
         with open(entity_occur_file, 'wb') as f_out:
             pickle.dump(keyword_occur, f_out)
