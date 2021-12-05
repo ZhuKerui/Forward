@@ -17,12 +17,13 @@ import sys
 import linecache
 import numpy as np
 import bz2
+import itertools
 from wikipedia2vec import Wikipedia2Vec
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk import word_tokenize
 sys.path.append('..')
 
-from tools.BasicUtils import MyMultiProcessing, my_read, my_write
+from tools.BasicUtils import MyMultiProcessing, my_read, my_write, my_read_pickle, my_write_pickle
 from tools.TextProcessing import (remove_brackets,
                                   nlp, find_span, sent_lemmatize, find_dependency_path_from_tree,
                                   build_word_tree_v2)
@@ -357,6 +358,11 @@ def get_entity_page(ent:str):
                         return lines
     return []
 
+
+def find_all_triangles(graph:nx.Graph):
+    return set(frozenset([n,nbr,nbr2]) for n in tqdm.tqdm(graph) for nbr, nbr2 in itertools.combinations(graph[n],2) if nbr in graph[nbr2])
+
+
 if __name__ == '__main__':
     # Generate the save dir
     if not os.path.exists(save_path):
@@ -377,8 +383,7 @@ if __name__ == '__main__':
         with bz2.open(w2vec_dump_file) as f_in:
             w2vec = Wikipedia2Vec.load(f_in)
         
-        with open(path_pattern_count_file, 'rb') as f_in:
-            c = pickle.load(f_in)
+        c = my_read_pickle(path_pattern_count_file)
 
         max_cnt = c.most_common(1)[0][1]
         log_max_cnt = np.log(max_cnt+1)
@@ -417,8 +422,7 @@ if __name__ == '__main__':
             return g
 
         graph = generate_graph(save_selected_files, 0.55)
-        with open(graph_file, 'wb') as f_out:
-            pickle.dump(graph, f_out)
+        my_write_pickle(graph_file, graph)
             
             
     elif sys.argv[1] == 'generate_single_sent_graph':
@@ -436,12 +440,10 @@ if __name__ == '__main__':
                 single_sent_g.add_edge(*edge, score=best_score, note=best_note)
             return single_sent_g
 
-        with open(graph_file, 'rb') as f_in:
-            graph = pickle.load(f_in)
+        graph = my_read_pickle(graph_file)
             
         single_sent_g = generate_single_sent_graph(graph)
-        with open(single_sent_graph_file, 'wb') as f_out:
-            pickle.dump(single_sent_g, f_out)
+        my_write_pickle(single_sent_graph_file, single_sent_g)
         
         
     elif sys.argv[1] == 'collect_ent_occur_from_selected':
@@ -463,5 +465,23 @@ if __name__ == '__main__':
                 
         keyword_occur = {}
         collect_ent_occur_from_selected(save_selected_files, keyword_occur)
-        with open(entity_occur_file, 'wb') as f_out:
-            pickle.dump(keyword_occur, f_out)
+        my_write_pickle(entity_occur_file, keyword_occur)
+            
+    elif sys.argv[1] == 'collect_triangles_from_graph':
+        
+        with bz2.open(w2vec_dump_file) as f_in:
+            w2vec = Wikipedia2Vec.load(f_in)
+            
+        graph = my_read_pickle(single_sent_graph_file)
+        edges = [edge for edge in tqdm.tqdm(graph.edges) if graph.get_edge_data(*edge)['score'] > 0.65]
+        filtered_graph = graph.edge_subgraph(edges)
+        nodes = []
+        for node in tqdm.tqdm(filtered_graph):
+            ent = w2vec.get_entity(node)
+            if ent is None:
+                continue
+            if ent.count >= 20:
+                nodes.append(node)
+        filtered_graph = filtered_graph.subgraph(nodes)
+        triangle_set = find_all_triangles(filtered_graph)
+        my_write_pickle('data/extract_wiki/triangles.pickle', triangle_set)

@@ -8,6 +8,7 @@ from math import ceil
 import subprocess
 import wikipedia
 import json
+import pickle
 import csv
 import tqdm
 import time
@@ -54,9 +55,17 @@ def nsmallidx(n, score:Iterable):
 def my_read(file_name:str):
     return open(file_name, 'r').read().strip().split('\n')
 
+def my_read_pickle(file_name:str):
+    with open(file_name, 'rb') as f_in:
+        return pickle.load(f_in)
+
 def my_write(file_name:str, content:List[str]):
     with open(file_name, 'w') as f_out:
         f_out.write('\n'.join(content))
+        
+def my_write_pickle(file_name:str, content):
+    with open(file_name, 'wb') as f_out:
+        pickle.dump(content, f_out)
 
 def my_json_read(file_name:str):
     return json.load(open(file_name, 'r'))
