@@ -3,10 +3,12 @@
 # python extract_wiki.py generate_graph
 # python extract_wiki.py collect_ent_occur_from_selected
 # python extract_wiki.py generate_single_sent_graph
+# python extract_wiki.py collect_ent_occur_from_cooccur
 
 import re
 import os
 from collections import Counter
+from queue import SimpleQueue
 from nltk.tokenize import sent_tokenize
 import tqdm
 import csv
@@ -50,7 +52,6 @@ w2vec_entity_file = 'data/extract_wiki/w2vec_entity.txt'
 w2vec_wordtree_file = 'data/extract_wiki/w2vec_wordtree.pickle'
 w2vec_token_file = 'data/extract_wiki/w2vec_tokens.txt'
 w2vec_keyword2idx_file = 'data/extract_wiki/w2vec_keyword2idx.pickle'
-w2vec_low2ori_file = 'data/extract_wiki/w2vec_low2ori.pickle'
 
 test_path = 'data/extract_wiki/wiki_sent_test'
 path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
@@ -374,6 +375,35 @@ def get_entity_page(ent:str):
     return []
 
 
+def find_triangles(graph:nx.Graph, node:str):
+    triangles = set()
+    neighbors = set(graph.neighbors(node))
+    for neighbor in neighbors:
+        second_neighbors = set(graph.neighbors(neighbor))
+        inter_neighbors = neighbors & second_neighbors
+        for third_neighbor in inter_neighbors:
+            triangles.add(frozenset((node, neighbor, third_neighbor)))
+    return triangles
+
+
+def find_path_between_pair(graph:nx.Graph, first_node:str, second_node:str, hop_num:int=1):
+    possible_paths = SimpleQueue()
+    possible_paths.put([first_node])
+    ret = []
+    for i in range(hop_num+1):
+        path_num = possible_paths.qsize()
+        for path_idx in range(path_num):
+            path = possible_paths.get()
+            for neighbor in graph.neighbors(path[-1]):
+                if neighbor not in path:
+                    new_path = path + [neighbor]
+                    if neighbor == second_node:
+                        ret.append(new_path)
+                    else:
+                        possible_paths.put(new_path)
+    return ret
+
+
 def find_all_triangles(graph:nx.Graph):
     return set(frozenset([n,nbr,nbr2]) for n in tqdm.tqdm(graph) for nbr, nbr2 in itertools.combinations(graph[n],2) if nbr in graph[nbr2])
 
@@ -391,6 +421,27 @@ if __name__ == '__main__':
         
         wiki_sent_pair = [(wiki_files[i], save_sent_files[i], save_cooccur_files[i], save_title_files[i]) for i in range(len(wiki_files))]
         output = p.run(get_sentence, wiki_sent_pair)
+        
+    
+    elif sys.argv[1] == 'collect_ent_occur_from_cooccur':
+        
+        def collect_ent_occur_from_cooccur(files:list, keyword_dict:dict):
+            for file in tqdm.tqdm(files):
+                with open(file) as f_in:
+                    for i, line in enumerate(f_in):
+                        entities = line.strip().split('\t')
+                        if not entities:
+                            continue
+                        note = line2note(file, i, '_co_.dat')
+                        for ent in entities:
+                            if ent not in keyword_dict:
+                                keyword_dict[ent] = set()
+                            keyword_dict[ent].add(note)
+                
+        entity_occur = {}
+        collect_ent_occur_from_cooccur(save_cooccur__files, entity_occur)
+        entity_occur = {k:v for k, v in entity_occur.items() if len(v) >= 20}
+        my_write_pickle(entity_occur_from_cooccur_file, entity_occur)
         
         
     elif sys.argv[1] == 'collect_dataset':
@@ -499,24 +550,3 @@ if __name__ == '__main__':
         filtered_graph = filtered_graph.subgraph(nodes)
         triangle_set = find_all_triangles(filtered_graph)
         my_write_pickle('data/extract_wiki/triangles.pickle', triangle_set)
-        
-
-    elif sys.argv[1] == 'collect_ent_occur_from_cooccur':
-        
-        def collect_ent_occur_from_cooccur(files:list, keyword_dict:dict):
-            for file in tqdm.tqdm(files):
-                with open(file) as f_in:
-                    for i, line in enumerate(f_in):
-                        entities = line.strip().split('\t')
-                        if not entities:
-                            continue
-                        note = line2note(file, i, '_co_.dat')
-                        for ent in entities:
-                            if ent not in keyword_dict:
-                                keyword_dict[ent] = set()
-                            keyword_dict[ent].add(note)
-                
-        entity_occur = {}
-        collect_ent_occur_from_cooccur(save_cooccur__files, entity_occur)
-        entity_occur = {k:v for k, v in entity_occur.items() if len(v) >= 20}
-        my_write_pickle(entity_occur_from_cooccur_file, entity_occur)
