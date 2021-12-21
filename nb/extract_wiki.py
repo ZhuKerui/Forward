@@ -6,6 +6,7 @@
 
 import re
 import os
+from collections import Counter
 from nltk.tokenize import sent_tokenize
 import tqdm
 import csv
@@ -38,7 +39,8 @@ wikipedia_keyword_file = 'data/extract_wiki/keywords.txt'
 wikipedia_wordtree_file = 'data/extract_wiki/wordtree.pickle'
 wikipedia_token_file = 'data/extract_wiki/tokens.txt'
 save_path = 'data/extract_wiki/wiki_sent_collect'
-entity_occur_file = 'data/extract_wiki/entity_occur.pickle'
+entity_occur_from_selected_file = 'data/extract_wiki/entity_occur_from_selected.pickle'
+entity_occur_from_cooccur_file = 'data/extract_wiki/entity_occur_from_cooccur.pickle'
 graph_file = 'data/extract_wiki/graph.pickle'
 single_sent_graph_file = 'data/extract_wiki/single_sent_graph.pickle'
 
@@ -113,6 +115,9 @@ __pattern_freq = 'pattern_freq'
 __score = 'score'
 __similar_threshold = 0.4
 __score_threshold = 0.5
+__pattern_freq_w = 0.5
+__kw_recall_w = 0.25
+__coverage_w = 0.25
 
 # Some task specific classes
 
@@ -215,7 +220,7 @@ def get_ahead(doc, idx):
                     mod_exist = True
     return idx
 
-feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
+feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
 
 def feature_process(doc, pairs):
     data = []
@@ -248,6 +253,7 @@ def feature_process(doc, pairs):
                 if not path:
                     continue
                 item[__dep_path] = path
+                item[__pattern] = gen_pattern(path)
                 item[__dep_coverage] = ((kw1_right_most - kw1_left_most + 1) + (kw2_right_most - kw2_left_most + 1) + len(path.split()) - 1) / len(doc)
                 item[__surface_coverage] = max(kw1_right_most - kw2_left_most + 1, kw2_right_most - kw1_left_most + 1) / len(doc)
 
@@ -259,6 +265,7 @@ def reverse_path(path:str):
     path = path.split()
     r_path = ' '.join(['i_' + token if token[:2] != 'i_' else token[2:] for token in reversed(path)])
     return r_path
+
 
 def gen_pattern(path:str):
     if 'i_nsubj' not in path:
@@ -317,30 +324,38 @@ def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec
     return data
 
 
-def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, dep_coverage:float, surface_coverage:float):
-    return ((pattern_freq)**0.3) * (((kw1_recall + kw2_recall) / 2)**0.35) * (((dep_coverage + surface_coverage) / 2)**0.35)
+record_columns = feature_columns + [__pattern_freq, __score]
 
-record_columns = feature_columns + [__pattern, __pattern_freq, __score]
 
-def filter_path_from_df(df:pd.DataFrame, cal_freq):
-    sub_df = df[df[__sim] >= __similar_threshold]
-    sub_df = sub_df.assign(pattern = sub_df.apply(lambda x: gen_pattern(x[__dep_path]), axis=1))
-    sub_df = sub_df.assign(pattern_freq = sub_df.apply(lambda x: cal_freq(x[__pattern]), axis=1))
-    sub_df = sub_df.assign(score = sub_df.apply(lambda x: cal_score(x[__pattern_freq], x[__kw1_recall], x[__kw2_recall], x[__dep_coverage], x[__surface_coverage]), axis=1))
+def filter_unrelated_from_df(df:pd.DataFrame, similar_threshold):
+    return df[df[__sim] >= similar_threshold]
+
+
+def cal_freq_from_path(path:str, c:Counter, log_max_cnt:float):
+    cnt = c.get(path)
+    cnt = (cnt if cnt else 0.5) + 1
+    return np.log(cnt) / log_max_cnt
+
+
+def load_pattern_freq(path_pattern_count_file_:str):
+    c = my_read_pickle(path_pattern_count_file_)
+    max_cnt = c.most_common(1)[0][1]
+    log_max_cnt = np.log(max_cnt+1)
+    return c, log_max_cnt
+
+
+def cal_freq_from_df(df:pd.DataFrame, c:Counter, log_max_cnt:float):
+    return df.assign(pattern_freq = df.apply(lambda x: cal_freq_from_path(x[__pattern], c, log_max_cnt), axis=1))
+
+
+def cal_score_from_df(df:pd.DataFrame, pattern_freq_w:float, kw_recall_w:float, coverage_w:float):
+    
+    def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, dep_coverage:float, surface_coverage:float):
+        return ((pattern_freq)**pattern_freq_w) * (((kw1_recall + kw2_recall) / 2)**kw_recall_w) * (((dep_coverage + surface_coverage) / 2)**coverage_w)
+
+    sub_df = df.assign(score = df.apply(lambda x: cal_score(x[__pattern_freq], x[__kw1_recall], x[__kw2_recall], x[__dep_coverage], x[__surface_coverage]), axis=1))
     sub_df = sub_df[sub_df[__score] > __score_threshold]
     return sub_df
-
-def filter_path_from_list(pairs:list, cal_freq):
-    data = []
-    for item in pairs:
-        if item[__sim] < __similar_threshold:
-            continue
-        item[__pattern] = gen_pattern(item[__dep_path])
-        item[__pattern_freq] = cal_freq(item[__pattern])
-        item[__score] = cal_score(item[__pattern_freq], item[__kw1_recall], item[__kw2_recall], item[__dep_coverage], item[__surface_coverage])
-        if item[__score] > __score_threshold:
-            data.append(item)
-    return data
 
 
 def get_entity_page(ent:str):
@@ -383,20 +398,18 @@ if __name__ == '__main__':
         with bz2.open(w2vec_dump_file) as f_in:
             w2vec = Wikipedia2Vec.load(f_in)
         
-        c = my_read_pickle(path_pattern_count_file)
-
-        max_cnt = c.most_common(1)[0][1]
-        log_max_cnt = np.log(max_cnt+1)
-
-        def cal_freq(path:str):
-            cnt = c.get(path)
-            cnt = (cnt if cnt else 0.5) + 1
-            return np.log(cnt) / log_max_cnt
+        c, log_max_cnt = load_pattern_freq(path_pattern_count_file)
         
-        def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, columns:list, posfix:str='.dat'):
-            pd.DataFrame(filter_path_from_list(process_file(save_sent_file, save_cooccur__file, w2vec, posfix), cal_freq)).to_csv(save_selected_file, columns=columns, sep='\t', index=False)
+        def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, posfix:str='.dat'):
+            pairs = process_file(save_sent_file, save_cooccur__file, w2vec, posfix)
+            pairs = [item for item in pairs if 'nsubj' in item[__dep_path]]
+            data = pd.DataFrame(pairs)
+            data = filter_unrelated_from_df(data, __similar_threshold)
+            data = cal_freq_from_df(data, c, log_max_cnt)
+            data = cal_score_from_df(data, __pattern_freq_w, __kw_recall_w, __coverage_w)
+            data.to_csv(save_selected_file, columns=record_columns, sep='\t', index=False)
 
-        input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i], feature_columns + [__pattern, __pattern_freq, __score]) for i in range(len(save_sent_files))]
+        input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
         _ = p.run(collect_dataset, input_list)
         
         
@@ -465,8 +478,9 @@ if __name__ == '__main__':
                 
         keyword_occur = {}
         collect_ent_occur_from_selected(save_selected_files, keyword_occur)
-        my_write_pickle(entity_occur_file, keyword_occur)
+        my_write_pickle(entity_occur_from_selected_file, keyword_occur)
             
+
     elif sys.argv[1] == 'collect_triangles_from_graph':
         
         with bz2.open(w2vec_dump_file) as f_in:
@@ -485,3 +499,24 @@ if __name__ == '__main__':
         filtered_graph = filtered_graph.subgraph(nodes)
         triangle_set = find_all_triangles(filtered_graph)
         my_write_pickle('data/extract_wiki/triangles.pickle', triangle_set)
+        
+
+    elif sys.argv[1] == 'collect_ent_occur_from_cooccur':
+        
+        def collect_ent_occur_from_cooccur(files:list, keyword_dict:dict):
+            for file in tqdm.tqdm(files):
+                with open(file) as f_in:
+                    for i, line in enumerate(f_in):
+                        entities = line.strip().split('\t')
+                        if not entities:
+                            continue
+                        note = line2note(file, i, '_co_.dat')
+                        for ent in entities:
+                            if ent not in keyword_dict:
+                                keyword_dict[ent] = set()
+                            keyword_dict[ent].add(note)
+                
+        entity_occur = {}
+        collect_ent_occur_from_cooccur(save_cooccur__files, entity_occur)
+        entity_occur = {k:v for k, v in entity_occur.items() if len(v) >= 20}
+        my_write_pickle(entity_occur_from_cooccur_file, entity_occur)
