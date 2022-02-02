@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
+import os
+import tqdm
 import transformers
 import numpy as np
 from pathlib import Path
@@ -14,8 +16,8 @@ from torch.utils.data import DataLoader, SequentialSampler
 
 import src.slurm
 import src.util
-from src.options import Options
-from src.data import FiDDataset, Collator
+from FiDOptions import FiDOptions
+from FiDDataset import FiDDataset, Collator
 import src.evaluation
 import src.model
 
@@ -34,7 +36,7 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
         write_path = Path(opt.checkpoint_dir) / opt.name / 'test_results'
         fw = open(write_path / ('%d.txt'%opt.global_rank), 'a')
     with torch.no_grad():
-        for i, batch in enumerate(dataloader):
+        for i, batch in enumerate(tqdm.tqdm(dataloader)):
             (idx, _, _, context_ids, context_mask) = batch
 
             if opt.write_crossattention_scores:
@@ -80,13 +82,17 @@ def evaluate(model, dataset, dataloader, tokenizer, opt):
 
 
 if __name__ == "__main__":
-    options = Options()
-    options.add_reader_options()
+    options = FiDOptions()
+    options.add_model_specific_options()
+    options.add_optim_options()
     options.add_eval_options()
     opt = options.parse()
+    if opt.gpu >= 0:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(opt.gpu)
+        
     src.slurm.init_distributed_mode(opt)
     src.slurm.init_signal_handler()
-    opt.train_batch_size = opt.per_gpu_batch_size * max(1, opt.world_size)
+    # opt.train_batch_size = opt.per_gpu_batch_size * max(1, opt.world_size)
 
     dir_path = Path(opt.checkpoint_dir)/opt.name
     directory_exists = dir_path.exists()
@@ -109,7 +115,8 @@ if __name__ == "__main__":
         global_rank=opt.global_rank, #use the global rank and world size attibutes to split the eval set on multiple gpus
         world_size=opt.world_size,
         no_sent=opt.no_sent,
-        no_path=opt.no_path
+        no_path=opt.no_path,
+        duplicate_sample=opt.duplicate_sample
     )
 
     eval_sampler = SequentialSampler(eval_dataset) 

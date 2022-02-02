@@ -47,7 +47,8 @@ class Options():
 
     def add_eval_options(self):
         self.parser.add_argument('--eval_data', type=str, default='none', help='path of eval data')
-    
+        self.parser.add_argument('--eval_print_freq', type=int, default=100,
+                        help='print intermdiate results of evaluation every <eval_print_freq> steps')
     
     def add_train_options(self):
         # training parameters
@@ -57,8 +58,6 @@ class Options():
                         help='evaluate model every <eval_freq> steps during training')
         self.parser.add_argument('--save_freq', type=int, default=5000,
                         help='save model every <save_freq> steps during training')
-        self.parser.add_argument('--eval_print_freq', type=int, default=1000,
-                        help='print intermdiate results of evaluation every <eval_print_freq> steps')
         self.parser.add_argument('--early_stop_count', type=int, default=10,
                         help='the number of steps for early step')
 
