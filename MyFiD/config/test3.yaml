@@ -2,7 +2,7 @@
 checkpoint_dir: 'checkpoint'
 model_path: 'checkpoint/baseline3/checkpoint/best_dev'
 name: 'baseline3_test'
-gpu: 0
+gpu: 2
 per_gpu_batch_size: 8
 seed: 0
 
