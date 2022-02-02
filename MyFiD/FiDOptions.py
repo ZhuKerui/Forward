@@ -25,5 +25,6 @@ class FiDOptions(Options):
                         help='maximum number of tokens used to train the model, no truncation if -1')
         self.parser.add_argument('--no_sent', type=bool, default=False, help='no sentence in context')
         self.parser.add_argument('--no_path', type=bool, default=False, help='no path information')
+        self.parser.add_argument('--duplicate_sample', type=bool, default=True, help='use duplicated samples to align context passages')
         
         

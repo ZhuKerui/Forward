@@ -16,7 +16,7 @@ from FiDOptions import FiDOptions
 import src.slurm
 import src.util
 import src.evaluation
-from src.data import FiDDataset, Collator
+from FiDDataset import FiDDataset, Collator
 import src.model
 
 import random
@@ -174,7 +174,8 @@ if __name__ == "__main__":
         global_rank=opt.global_rank, 
         world_size=opt.world_size,
         no_sent=opt.no_sent,
-        no_path=opt.no_path
+        no_path=opt.no_path,
+        duplicate_sample=opt.duplicate_sample
     )
     # use golbal rank and world size to split the eval set on multiple gpus
     eval_dataset = FiDDataset(
@@ -183,7 +184,8 @@ if __name__ == "__main__":
         global_rank=opt.global_rank, 
         world_size=opt.world_size,
         no_sent=opt.no_sent,
-        no_path=opt.no_path
+        no_path=opt.no_path,
+        duplicate_sample=opt.duplicate_sample
     )
 
     if not checkpoint_exists and opt.model_path == "none":

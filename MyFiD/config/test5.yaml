@@ -15,3 +15,4 @@ n_context: 5
 text_maxlength: 250
 no_sent: false
 no_path: false
+duplicate_sample: true
