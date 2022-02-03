@@ -1,7 +1,7 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
-name: 'baseline4'
-gpu: 2
+name: 'baseline5_b1'
+gpu: 1
 per_gpu_batch_size: 8
 seed: 0
 
@@ -17,8 +17,8 @@ total_steps: 45000
 
 # model specific parameters
 model_size: 'base'
-n_context: 3
+n_context: 5
 text_maxlength: 250
 no_sent: false
 no_path: false
-duplicate_sample: true
+duplicate_sample: false
