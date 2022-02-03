@@ -429,9 +429,10 @@ def generate_sample(graph:nx.Graph, ent1:str, ent2:str, hop_num:int=1, max_path_
     target.sort(key=lambda x: x[0], reverse=True)
     target_note = target[0][1]
     for path in paths:
+        idx_path = [entity.index(i) for i in path]
         sents = [(
             graph.get_edge_data(path[i], path[i+1])['data'],
-            (entity.index(path[i]), entity.index(path[i+1]))
+            (idx_path[i], idx_path[i+1])
             )for i in range(len(path)-1)]
         temp_triples = []
         sent_in_use = set([target_note])
@@ -455,7 +456,10 @@ def generate_sample(graph:nx.Graph, ent1:str, ent2:str, hop_num:int=1, max_path_
                 break
         if not note_found:
             continue
-        triples.append(temp_triples)
+        re_ordered_temp_triples = [{} for i in range(len(path)-1)]
+        for item in temp_triples:
+            re_ordered_temp_triples[idx_path.index(item['e1'])] = item
+        triples.append(re_ordered_temp_triples)
     if not triples:
         return None
     source = set()
@@ -523,12 +527,13 @@ def sample_to_neo4j(sample:dict):
     for ent in sample['entity']:
         if ent not in sample['pair']:
             cmd.append('CREATE (:ENT:INTERMEDIA {ent:"%s"});' % ent)
-    for tri in sample['triple']:
-        ent1 = sample['entity'][tri[0]]
-        ent2 = sample['entity'][tri[1]]
-        sent = sample['source'][tri[2]]
-        score = tri[3]
-        cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:Sent {sent:"%s", pair:"%s <-> %s", score:%.3f}]->(ent2);' % (ent1, ent2, sent, ent1, ent2, score))
+    for path in sample['triple']:
+        for tri in path:
+            ent1 = sample['entity'][tri['e1']]
+            ent2 = sample['entity'][tri['e2']]
+            sent = sample['source'][tri['sent']]
+            score = tri['score']
+            cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:Sent {sent:"%s", pair:"%s <-> %s", score:%.3f}]->(ent2);' % (ent1, ent2, sent, ent1, ent2, score))
     cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:OUT {sent:"%s", pair:"%s <-> %s"}]->(ent2);' % (*sample['pair'], sample['target'], *sample['pair']))
     print('\n'.join(cmd))
 
@@ -723,12 +728,7 @@ if __name__ == '__main__':
                     status_bar.update(20)
             if (sample_num > 0) and (len(samples) >= sample_num):
                 break
-        # outputs = p.run(generate_sample, input_list)
-        # for out in outputs:
-        #     samples.extend(out)
-        # samples = [sample for sample in samples if sample is not None]
         print(len(samples) * 1.0 / edge_count)
-        # print(len(samples) * 1.0 / len(input_list))
     
         with open('dataset_level_1.json', 'w') as f_out:
             json.dump(samples, f_out)

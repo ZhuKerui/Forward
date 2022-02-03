@@ -11,7 +11,7 @@
 
 ​		e1--s1--w1--s2--e2 => `entity1: e1 entity2: e2 path: e1; w1; e2 sentence1: s1 sentence2: s2`
 
-- Dataset split （**注意设random seed，为了保证每次划分一致，e.g.，random.seed(0）**）
+- Dataset split 
   
    - Total: 107684
    - Train: 85%
@@ -20,8 +20,8 @@
    
 - Baselines (Try 1,3,4 First)
   
-   1. `target1: e1 target2: e2`
-   2. `target1: e1 target2: e2 path: e1; w1; e2`
+   1. `entity1: e1 entity2: e2`
+   2. `entity1: e1 entity2: e2 path: e1; w1; e2`
    3. k=1
    4. k=3
    5. k=5
