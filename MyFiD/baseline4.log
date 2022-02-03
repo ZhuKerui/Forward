@@ -1,0 +1,39 @@
+BLEU
+{
+ "name": "BLEU",
+ "score": 42.8676,
+ "signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.0.0",
+ "verbose_score": "72.5/52.9/40.8/32.5 (BP = 0.903 ratio = 0.907 hyp_len = 128275 ref_len = 141376)",
+ "nrefs": "1",
+ "case": "mixed",
+ "eff": "no",
+ "tok": "13a",
+ "smooth": "exp",
+ "version": "2.0.0"
+}
+
+ROUGE
+{
+  "rouge-1": {
+    "f": 0.6134273440426663
+  },
+  "rouge-2": {
+    "f": 0.39820164069616665
+  },
+  "rouge-l": {
+    "f": 0.5717091372960013
+  }
+}
+
+METEOR
+Test words:             110662
+Reference words:        121679
+Chunks:                 24769
+Precision:              0.7354104216331895
+Recall:                 0.6584664973285451
+f1:                     0.6948147542215074
+fMean:                  0.6689652908983328
+Fragmentation penalty:  0.4725215081356917
+
+Final score:            0.35286480275262083
+
