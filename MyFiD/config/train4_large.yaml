@@ -1,8 +1,8 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
-name: 'baseline5_b1'
-gpu: 2
-per_gpu_batch_size: 8
+name: 'baseline4_large'
+gpu: 0
+per_gpu_batch_size: 4
 seed: 0
 
 # training parameters
@@ -13,12 +13,12 @@ eval_freq: 1000
 # optim parameters
 # epochs: 20
 early_stop_count: 20
-total_steps: 50000
+total_steps: 70000
 
 # model specific parameters
-model_size: 'base'
-n_context: 5
+model_size: 'large'
+n_context: 3
 text_maxlength: 250
 no_sent: false
 no_path: false
-duplicate_sample: false
+duplicate_sample: true
