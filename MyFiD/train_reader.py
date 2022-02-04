@@ -102,9 +102,9 @@ def train(model, optimizer, scheduler, step, train_dataset, eval_dataset, opt, c
                         tb_logger.add_scalar("Training", curr_loss / (opt.eval_freq), step)
                     curr_loss = 0.
 
-            if opt.is_main and step % opt.save_freq == 0:
-                src.util.save(model, optimizer, scheduler, step, best_dev_em,
-                          opt, checkpoint_path, f"step-{step}")
+            # if opt.is_main and step % opt.save_freq == 0:
+            #     src.util.save(model, optimizer, scheduler, step, best_dev_em,
+            #               opt, checkpoint_path, f"step-{step}")
             if step >= opt.total_steps or early_stop_count >= opt.early_stop_count:
                 break
 
