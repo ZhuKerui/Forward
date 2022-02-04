@@ -37,3 +37,6 @@ Fragmentation penalty:  0.474689045346987
 
 Final score:            0.3492159565848157
 
+BERTSCORE
+roberta-large-mnli_L19_no-idf_version=0.3.11(hug_trans=4.15.0)_fast-tokenizer P: 0.888436 R: 0.855890 F1: 0.871533
+
