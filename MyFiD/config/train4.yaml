@@ -1,7 +1,7 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
 name: 'baseline4'
-gpu: 2
+gpu: 0
 per_gpu_batch_size: 8
 seed: 0
 
@@ -13,7 +13,7 @@ eval_freq: 1000
 # optim parameters
 # epochs: 20
 early_stop_count: 20
-total_steps: 45000
+total_steps: 50000
 
 # model specific parameters
 model_size: 'base'

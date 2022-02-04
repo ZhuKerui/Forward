@@ -13,7 +13,7 @@ eval_freq: 1000
 # optim parameters
 # epochs: 20
 early_stop_count: 20
-total_steps: 45000
+total_steps: 50000
 
 # model specific parameters
 model_size: 'base'
