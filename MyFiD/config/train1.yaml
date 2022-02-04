@@ -11,7 +11,9 @@ eval_data: 'data/dev.json'
 eval_freq: 1000
 
 # optim parameters
-epochs: 20
+# epochs: 20
+early_stop_count: 20
+total_steps: 50000
 
 # model specific parameters
 model_size: 'base'

@@ -1,7 +1,7 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
 name: 'baseline3'
-gpu: 2
+gpu: 1
 per_gpu_batch_size: 8
 seed: 0
 
@@ -11,7 +11,9 @@ eval_data: 'data/dev.json'
 eval_freq: 1000
 
 # optim parameters
-epochs: 20
+# epochs: 20
+early_stop_count: 20
+total_steps: 50000
 
 # model specific parameters
 model_size: 'base'
