@@ -677,7 +677,8 @@ if __name__ == '__main__':
                             data['data'].append((score, line[sent_idx], (line[head_span_idx], line[tail_span_idx])))
             return g
 
-        graph = generate_graph(save_selected_files, 0.6)
+        # graph = generate_graph(save_selected_files, 0.6)
+        graph = generate_graph(save_selected_files, 0.3)
         my_write_pickle(graph_file, graph)
             
             

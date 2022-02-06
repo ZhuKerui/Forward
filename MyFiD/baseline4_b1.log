@@ -1,9 +1,9 @@
 BLEU
 {
  "name": "BLEU",
- "score": 43.0539,
+ "score": 43.0557,
  "signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.0.0",
- "verbose_score": "72.4/52.7/40.7/32.6 (BP = 0.907 ratio = 0.911 hyp_len = 128824 ref_len = 141376)",
+ "verbose_score": "73.1/53.5/41.4/33.3 (BP = 0.894 ratio = 0.899 hyp_len = 127241 ref_len = 141533)",
  "nrefs": "1",
  "case": "mixed",
  "eff": "no",
@@ -15,25 +15,28 @@ BLEU
 ROUGE
 {
   "rouge-1": {
-    "f": 0.6129779256361755
+    "f": 0.6133434407550328
   },
   "rouge-2": {
-    "f": 0.39723271521962344
+    "f": 0.39870911280958604
   },
   "rouge-l": {
-    "f": 0.5703718265145848
+    "f": 0.5710546075375914
   }
 }
 
 METEOR
-Test words:             111063
-Reference words:        121679
-Chunks:                 24838
-Precision:              0.7335385146181864
-Recall:                 0.6587390733117281
-f1:                     0.6941295120271229
-fMean:                  0.6689713962973359
-Fragmentation penalty:  0.47268566305321463
+Test words:             109667
+Reference words:        121829
+Chunks:                 24538
+Precision:              0.7400293864877603
+Recall:                 0.6576088135759306
+f1:                     0.6963888749425466
+fMean:                  0.6687816193920904
+Fragmentation penalty:  0.4717829128175179
 
-Final score:            0.3527582082748949
+Final score:            0.3532618789564733
+
+BERTSCORE
+roberta-large-mnli_L19_no-idf_version=0.3.11(hug_trans=4.15.0)_fast-tokenizer P: 0.892565 R: 0.857898 F1: 0.874560
 
