@@ -1,9 +1,9 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
-model_path: 'checkpoint/baseline5/checkpoint/best_dev'
-name: 'baseline5_test'
-gpu: 2
-per_gpu_batch_size: 8
+model_path: 'checkpoint/baseline5_large/checkpoint/best_dev'
+name: 'baseline5_large_test'
+gpu: 1
+per_gpu_batch_size: 4
 seed: 0
 
 # evaluation parameters

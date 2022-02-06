@@ -1,7 +1,7 @@
 # basic parameters
 checkpoint_dir: 'checkpoint'
 name: 'baseline5_b1'
-gpu: 2
+gpu: 1
 per_gpu_batch_size: 8
 seed: 0
 
