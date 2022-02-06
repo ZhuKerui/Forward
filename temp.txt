@@ -1,7 +1,0 @@
-baseline3_large*
-baseline4*
-baseline4_b1*
-baseline4_large*
-baseline5*
-baseline5_b1
-baseline5_large*
