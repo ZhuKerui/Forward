@@ -1,8 +1,8 @@
 # python extract_wiki.py collect_sent_and_cooccur
 # python extract_wiki.py collect_ent_occur_from_cooccur
+# python extract_wiki.py collect_pattern_freq
 # python extract_wiki.py collect_dataset
 # python extract_wiki.py collect_score_function_eval_dataset
-# python extract_wiki.py collect_ent_occur_from_selected
 # python extract_wiki.py generate_graph
 # python extract_wiki.py generate_single_sent_graph
 # python extract_wiki.py collect_one_hop_sample_from_single_sent_graph
@@ -23,6 +23,7 @@ from urllib.parse import unquote
 import sys
 import linecache
 import numpy as np
+from typing import List
 import bz2
 import itertools
 from wikipedia2vec import Wikipedia2Vec
@@ -31,7 +32,7 @@ from nltk import word_tokenize
 sys.path.append('..')
 
 from tools.BasicUtils import MyMultiProcessing, my_read, my_write, my_read_pickle, my_write_pickle
-from tools.TextProcessing import (remove_brackets,
+from tools.TextProcessing import (remove_brackets, find_root_in_span, spacy, 
                                   nlp, find_span, sent_lemmatize, find_dependency_path_from_tree,
                                   build_word_tree_v2)
 from tools.DocProcessing import CoOccurrence
@@ -70,12 +71,10 @@ entity_occur_from_cooccur_file = 'data/extract_wiki/entity_occur_from_cooccur.pi
 path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
 path_pattern_count_file = 'data/extract_wiki/path_pattern.pickle'
 
-entity_occur_from_selected_file = 'data/extract_wiki/entity_occur_from_selected.pickle'
-
 graph_file = 'data/extract_wiki/graph.pickle'
 single_sent_graph_file = 'data/extract_wiki/single_sent_graph.pickle'
 
-p = MyMultiProcessing(5)
+p = MyMultiProcessing(10)
 
 patterns = [
             r'i_nsubj attr( prep pobj)*( compound){0, 1}', 
@@ -100,21 +99,14 @@ __sent = 'sent'
 __kw1_span = 'kw1_span'
 __kw2_span = 'kw2_span'
 __dep_path = 'dep_path'
-__kw1_full_span = 'kw1_full_span'
-__kw1_recall = 'kw1_recall'
-__kw2_full_span = 'kw2_full_span'
-__kw2_recall = 'kw2_recall'
 __dep_coverage = 'dep_coverage'
-__surface_coverage = 'surface_coverage'
 __sim = 'sim'
 __pattern = 'pattern'
 __pattern_freq = 'pattern_freq'
 __score = 'score'
-__similar_threshold = 0.4
-__score_threshold = 0.5
-__pattern_freq_w = 0.5
-__kw_recall_w = 0.25
-__coverage_w = 0.25
+__similar_threshold = 0.5
+__max_sentence_length = 50
+__min_sentence_length = 5
 
 # Some task specific classes
 
@@ -124,13 +116,14 @@ def collect_wiki_entity(file:str):
     return ['%s\t%s' % (line[9:re.search(r'" url="', line).start()], line[re.search(r'title="', line).end():re.search(r'">', line).start()]) for line in open(file).readlines() if re.match(r'^(<doc id=")', line) and line.isascii()]
 
 
-def gen_kw_from_wiki_ent(wiki_ent:str):
-    wiki_ent_lower = wiki_ent.lower()
-    bracket_removed = remove_brackets(wiki_ent_lower).strip()
+def gen_kw_from_wiki_ent(wiki_ent:str, lower:bool=True):
+    if lower:
+        wiki_ent = wiki_ent.lower()
+    bracket_removed = remove_brackets(wiki_ent).strip()
     if bracket_removed:
         return ' '.join(word_tokenize(bracket_removed.split(',')[0]))
     else:
-        return ' '.join(word_tokenize(wiki_ent_lower))
+        return ' '.join(word_tokenize(wiki_ent))
 
 
 def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_title_file:str):
@@ -148,7 +141,7 @@ def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_
                 continue
             if re.match(r'^(<doc id=")', line):
                 page_name = ' '.join(line[re.search(r'title="', line).end():re.search(r'">', line).start()].split())
-                page_kw = gen_kw_from_wiki_ent(page_name)
+                page_kw = gen_kw_from_wiki_ent(page_name, True)
                 wordtree, token2idx = build_word_tree_v2([page_kw])
                 kw2ent_map = {page_kw : page_name}
             else:
@@ -158,26 +151,33 @@ def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_
                 for l in links:
                     breakpoint = l.index('">')
                     entity_name = ' '.join(unquote(l[9:breakpoint]).split())
-                    kw = gen_kw_from_wiki_ent(entity_name)
+                    kw = gen_kw_from_wiki_ent(entity_name, False)
+                    kw_lower = kw.lower()
                     if kw == '':
                         print(wiki_file, line, entity_name)
                     else:
-                        kw2ent_map[kw] = entity_name
-                        new_kws.append(kw)
+                        kw2ent_map[kw_lower] = entity_name
+                        new_kws.append(kw_lower)
                     # Replace link with plain text
-                    kw_in_text = l[breakpoint+2:-4].lower()
-                    if kw[-len(kw_in_text):] == kw_in_text:
-                        line = line.replace(l, kw)
+                    kw_in_text:str = l[breakpoint+2:-4]
+                    kw_in_text_lower = kw_in_text.lower()
+                    if kw_lower[-len(kw_in_text):] == kw_in_text_lower:
+                        if kw_in_text.islower():
+                            line = line.replace(l, kw_lower)
+                        else:
+                            line = line.replace(l, kw)
                     else:
                         line = line.replace(l, kw_in_text)
-                paragraph = sent_tokenize(line.lower())
+                paragraph = sent_tokenize(line)
                 wordtree, token2idx = build_word_tree_v2(new_kws, old_MyTree=wordtree, old_token2idx=token2idx)
                 co = CoOccurrence(wordtree, token2idx)
                 for sent in paragraph:
-                    sent = word_tokenize(sent)
+                    sent = remove_brackets(sent)
+                    reformed_sent = word_tokenize(sent)
                     reformed_sent = sent_lemmatize(sent)
+                    reformed_sent = [text.lower() for text in reformed_sent]
                     kws = co.line_operation(reformed_sent)
-                    sents.append(' '.join(reformed_sent))
+                    sents.append(sent)
                     cooccurs.append('\t'.join([kw2ent_map[kw] for kw in kws]))
                 page_titles += [page_name] * len(paragraph)
                 
@@ -198,7 +198,7 @@ def note2line(note:str, posfix='.dat'):
 
 # Feature collection, contains subject/object full span and keyword-entity recall
 def get_back(doc, idx):
-    while doc[idx].dep_ == 'compound' or doc[idx].dep_ == 'amod':
+    while doc[idx].dep_ == 'compound':
         idx = doc[idx].head.i
     return idx
 
@@ -210,51 +210,88 @@ def get_ahead(doc, idx):
         c_dep_list = [c.dep_ for c in c_list]
         mod_exist = False
         for i, dep in enumerate(c_dep_list):
-            if 'amod' == dep or 'compound' == dep:
+            if 'compound' == dep:
                 idx_ = c_list[i].i
                 if idx_ < idx:
                     idx = idx_
                     mod_exist = True
     return idx
 
-feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
+# feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
+feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __dep_coverage]
 
-def feature_process(doc, pairs):
+def get_phrase_full_span(doc, phrase_span):
+    phrase_right_most = get_back(doc, phrase_span[-1].i)
+    phrase_left_most = min(get_ahead(doc, phrase_right_most), get_ahead(doc, phrase_span[0].i), phrase_span[0].i)
+    return (phrase_left_most, phrase_right_most)
+
+def cal_kw_recall(kw:str, full_phrase:str):
+    return np.log(kw.count(' ') + 1 + __const_num) / np.log(full_phrase.count(' ') + 1 + __const_num)
+
+def generate_clean_phrase(phrase:str):
+    return ' '.join(re.sub(r'[^a-z0-9\s]', '', phrase).split())
+
+
+def sentence_decompose(doc, kw1:str, kw2:str):
+    kw1_spans = find_span(doc, kw1, True, True)
+    kw2_spans = find_span(doc, kw2, True, True)
+    data = []
+    for kw1_span in kw1_spans:
+        for kw2_span in kw2_spans:
+            kw1_left_most, kw1_right_most = get_phrase_full_span(doc, kw1_span)
+            kw2_left_most, kw2_right_most = get_phrase_full_span(doc, kw2_span)
+            if kw1_left_most != kw1_span[0].i or kw1_right_most != kw1_span[-1].i or kw2_left_most != kw2_span[0].i or kw2_right_most != kw2_span[-1].i:
+                # full span and keyword span don't match
+                continue
+            kw1_steps, kw2_steps, branch = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
+            if not branch.any():
+                continue
+            path = get_path(doc, kw1_steps, kw2_steps)
+            pattern = gen_pattern(path)
+            if not pattern.startswith('i_nsubj'):
+                continue
+            data.append((kw1_span, kw2_span, branch, pattern))
+    return data
+
+
+def feature_process(doc, kw1:str, kw2:str)->List[dict]:
+    data = []
+    for kw1_span, kw2_span, branch, pattern in sentence_decompose(doc, kw1, kw2):
+        expand_dependency_info_from_tree(doc, branch)
+        data.append({__kw1_span : (kw1_span[0].i, kw1_span[-1].i),
+                     __kw2_span : (kw2_span[0].i, kw2_span[-1].i),
+                     __pattern : pattern, 
+                     __dep_coverage : branch.mean()
+                    })
+    return data
+
+
+def collect_sub_dep_path(doc, kw1:str, kw2:str)->List[dict]:
+    data = []
+    for kw1_span, kw2_span, branch, pattern in sentence_decompose(doc, kw1, kw2):
+        ans = [str(item[1]) for item in collect_sub_dependency_path(doc, branch)]
+        ans = [item.replace('compound', '').replace('conj', '').replace('appos', '') for item in ans if item != 'punct']
+        data.extend(ans)
+    return data
+
+
+def batched_feature_process(doc, pairs):
     data = []
     for item in pairs:
-        kw1_spans = find_span(doc, item[__kw1], True)
-        kw2_spans = find_span(doc, item[__kw2], True)
-        kw1_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item[__kw1]).split())
-        kw2_clean = ' '.join(re.sub(r'[^a-z0-9\s]', '', item[__kw2]).split())
-        
-        for kw1_span in kw1_spans:
-            for kw2_span in kw2_spans:
-                
-                item[__kw1_span] = (kw1_span[0].i, kw1_span[-1].i)
-                item[__kw2_span] = (kw2_span[0].i, kw2_span[-1].i)
-                
-                # Calculate subject and object coverage
-                kw1_right_most = get_back(doc, kw1_span[-1].i)
-                kw1_left_most = min(get_ahead(doc, kw1_right_most), get_ahead(doc, kw1_span[0].i), kw1_span[0].i)
-                
-                item[__kw1_full_span] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw1_left_most : kw1_right_most+1].text).split())
-                item[__kw1_recall] = np.log(kw1_clean.count(' ') + 1 + __const_num) / np.log(item[__kw1_full_span].count(' ') + 1 + __const_num)
+        # Calculate calculate dependency coverage
+        temp_data = feature_process(doc, item[__kw1], item[__kw2])
+        for d in temp_data:
+            d.update(item)
+        data.extend(temp_data)
+    return data
 
-                kw2_right_most = get_back(doc, kw2_span[-1].i)
-                kw2_left_most = min(get_ahead(doc, kw2_right_most), get_ahead(doc, kw2_span[0].i), kw2_span[0].i)
-                
-                item[__kw2_full_span] = ' '.join(re.sub(r'[^a-z0-9\s]', '', doc[kw2_left_most : kw2_right_most+1].text).split())
-                item[__kw2_recall] = np.log(kw2_clean.count(' ') + 1 + __const_num) / np.log(item[__kw2_full_span].count(' ') + 1 + __const_num)
-                
-                path = find_dependency_path_from_tree(doc, doc[kw1_left_most : kw1_right_most + 1], doc[kw2_left_most : kw2_right_most + 1])
-                if not path:
-                    continue
-                item[__dep_path] = path
-                item[__pattern] = gen_pattern(path)
-                item[__dep_coverage] = ((kw1_right_most - kw1_left_most + 1) + (kw2_right_most - kw2_left_most + 1) + len(path.split()) - 1) / len(doc)
-                item[__surface_coverage] = max(kw1_right_most - kw2_left_most + 1, kw2_right_most - kw1_left_most + 1) / len(doc)
 
-                data.append(item.copy())
+def batched_collect_sub_dep_path(doc, pairs):
+    data = []
+    for item in pairs:
+        # Calculate calculate dependency coverage
+        temp_data = collect_sub_dep_path(doc, item[__kw1], item[__kw2])
+        data.extend(temp_data)
     return data
 
 
@@ -280,7 +317,7 @@ def gen_pattern(path:str):
     return ' '.join(path_)
 
 
-def process_line(sent:str, ents:list, w2vec:Wikipedia2Vec, sent_note:str):
+def process_line(sent:str, ents:list, w2vec:Wikipedia2Vec, sent_note:str, processor):
     co_kws = []
     matrix = []
     for ent in ents:
@@ -302,10 +339,22 @@ def process_line(sent:str, ents:list, w2vec:Wikipedia2Vec, sent_note:str):
         for j in range(i+1, certain_len):
             pairs.append({__kw1:co_kws[i], __kw2:co_kws[j], __sim:float(result[i, j]), __sent:sent_note, __kw1_ent:ents[i], __kw2_ent:ents[j]})
     doc = nlp(sent)
-    return feature_process(doc, pairs)
+    if len(doc) > __max_sentence_length or len(doc) < __min_sentence_length:
+        return []
+    return processor(doc, pairs)
     
     
-def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec, posfix:str='.dat'):
+def process_list(sents:List[str], cooccurs:List[str], w2vec:Wikipedia2Vec, processor):
+    data = []
+    for line_idx, line in enumerate(tqdm.tqdm(cooccurs)):
+        line = line.split('\t')
+        if len(line) <= 1:
+            continue
+        data.extend(process_line(sents[line_idx], line, w2vec, sents[line_idx], processor))
+    return data
+
+
+def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec, processor, posfix:str='.dat'):
     # Build test data
     with open(save_sent_file) as f_in:
         sents = f_in.read().split('\n')
@@ -317,7 +366,7 @@ def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec
         if len(line) <= 1:
             continue
         sent_note = line2note(save_sent_file, line_idx, posfix=posfix)
-        data += process_line(sents[line_idx], line, w2vec, sent_note)
+        data += process_line(sents[line_idx], line, w2vec, sent_note, processor)
     return data
 
 
@@ -335,7 +384,7 @@ def cal_freq_from_path(path:str, c:Counter, log_max_cnt:float):
 
 
 def load_pattern_freq(path_pattern_count_file_:str):
-    c = my_read_pickle(path_pattern_count_file_)
+    c:Counter = my_read_pickle(path_pattern_count_file_)
     max_cnt = c.most_common(1)[0][1]
     log_max_cnt = np.log(max_cnt+1)
     return c, log_max_cnt
@@ -345,14 +394,12 @@ def cal_freq_from_df(df:pd.DataFrame, c:Counter, log_max_cnt:float):
     return df.assign(pattern_freq = df.apply(lambda x: cal_freq_from_path(x[__pattern], c, log_max_cnt), axis=1))
 
 
-def cal_score_from_df(df:pd.DataFrame, pattern_freq_w:float, kw_recall_w:float, coverage_w:float):
+def cal_score_from_df(df:pd.DataFrame):
     
-    def cal_score(pattern_freq:float, kw1_recall:float, kw2_recall:float, dep_coverage:float, surface_coverage:float):
-        # return ((pattern_freq)**pattern_freq_w) * (((kw1_recall + kw2_recall) / 2)**kw_recall_w) * (((dep_coverage + surface_coverage) / 2)**coverage_w)
-        return ((pattern_freq)**pattern_freq_w) * (((kw1_recall + kw2_recall) / 2)**kw_recall_w) * (dep_coverage**coverage_w)
+    def cal_score(pattern_freq:float, dep_coverage:float):
+        return 2 / ((1/pattern_freq)+(1/dep_coverage))
 
-    sub_df = df.assign(score = df.apply(lambda x: cal_score(x[__pattern_freq], x[__kw1_recall], x[__kw2_recall], x[__dep_coverage], x[__surface_coverage]), axis=1))
-    sub_df = sub_df[sub_df[__score] > __score_threshold]
+    sub_df = df.assign(score = df.apply(lambda x: cal_score(x[__pattern_freq], x[__dep_coverage]), axis=1))
     return sub_df
 
 
@@ -538,6 +585,120 @@ def sample_to_neo4j(sample:dict):
     print('\n'.join(cmd))
 
 
+modifier_dependencies = {'acl', 'advcl', 'advmod', 'amod', 'det', 'mark', 'meta', 'neg', 'nn', 'nmod', 'npmod', 'nummod', 'poss', 'prep', 'quantmod', 'relcl'}
+adjunctive_dependencies = {'appos', 'aux', 'auxpass', 'compound', 'cop', 'expl', 'punct', 'nsubj', 'dobj'}
+
+def expand_dependency_info_from_tree(doc, path:np.ndarray):
+    dep_path:list = (np.arange(*path.shape)[path!=0]).tolist()
+    for element in dep_path:
+        if doc[element].dep_ == 'conj':
+            path[doc[element].head.i] = 0
+    modifiers = []
+    for element in dep_path:
+        for child in doc[element].children:
+            if path[element] == 0 and child.dep_ == 'compound':
+                continue
+            if path[child.i] == 0 and (child.dep_ in modifier_dependencies or child.dep_ in adjunctive_dependencies):
+                path[child.i] = 1
+                modifiers.append(child.i)
+    while len(modifiers) > 0:
+        modifier = modifiers.pop(0)
+        for child in doc[modifier].children:
+            if path[child.i] == 0:
+                path[child.i] = 1
+                modifiers.append(child.i)
+
+
+def get_path(doc, kw1_steps:List[int], kw2_steps:List[int]):
+    path_tokens = []
+    for step in kw1_steps:
+        path_tokens.append('i_' + doc[step].dep_)
+    kw2_steps.reverse()
+    for step in kw2_steps:
+        path_tokens.append(doc[step].dep_)
+    return ' '.join(path_tokens)
+
+
+def find_dependency_info_from_tree(doc, kw1, kw2):
+    # Find roots of the spans
+    idx1 = find_root_in_span(kw1)
+    idx2 = find_root_in_span(kw2)
+    kw1_front, kw1_end = kw1[0].i, kw1[-1].i
+    kw2_front, kw2_end = kw2[0].i, kw2[-1].i
+    branch = np.zeros(len(doc))
+    kw1_steps = []
+    kw2_steps = []
+    path_found = False
+    
+    i = idx1
+    while branch[i] == 0:
+        branch[i] = 1
+        kw1_steps.append(i)
+        i = doc[i].head.i
+        if i >= kw2_front and i <= kw2_end:
+            # kw2 is above kw1
+            path_found = True
+            break
+        
+    if not path_found:
+        i = idx2
+        while branch[i] != 1:
+            branch[i] = 2
+            kw2_steps.append(i)
+            if i == doc[i].head.i:
+                return [], [], np.array([])
+            
+            i = doc[i].head.i
+            if i >= kw1_front and i <= kw1_end:
+                # kw1 is above kw2
+                branch[branch != 2] = 0
+                kw1_steps = []
+                path_found = True
+                break
+    
+    if not path_found:
+        # kw1 and kw2 are on two sides, i is their joint
+        break_point = kw1_steps.index(i)
+        branch[kw1_steps[break_point+1 : ]] = 0
+        kw1_steps = kw1_steps[:break_point] # Note that we remain the joint node in the branch, but we don't include joint point in kw1_steps and kw2_steps
+                                            # this is because the joint node is part of the path and we need the modification information from it, 
+                                            # but we don't care about its dependency
+    branch[branch != 0] = 1
+    branch[kw1_front : kw1_end+1] = 1
+    branch[kw2_front : kw2_end+1] = 1
+    return kw1_steps, kw2_steps, branch
+
+
+def collect_sub_dependency_path(doc, branch:np.ndarray):
+    paths = []
+    dep_path:list = (np.arange(*branch.shape)[branch!=0]).tolist()
+    for token_id in dep_path:
+        temp_paths = [(token_id, child.dep_, child.i) for child in doc[token_id].children if branch[child.i] == 0]
+        while len(temp_paths) > 0:
+            item  = temp_paths.pop()
+            paths.append(item)
+            temp_paths.extend([(item[0], item[1] + ' ' + child.dep_, child.i) for child in doc[item[2]].children if branch[child.i] == 0])
+    return paths
+
+def informativeness_demo(sent:str, kw1:str, kw2:str):
+    doc = nlp(sent)
+    kw1_span = find_span(doc, kw1, True, True)[0]
+    kw2_span = find_span(doc, kw2, True, True)[0]
+    path = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
+    context = []
+    temp = []
+    for i, checked in enumerate(path):
+        if checked:
+            temp.append(doc[i].text)
+        else:
+            if temp:
+                context.append(' '.join(temp))
+                temp = []
+    if temp:
+        context.append(' '.join(temp))
+    return context
+
+
 if __name__ == '__main__':
     # Generate the save dir
     if not os.path.exists(save_path):
@@ -570,8 +731,27 @@ if __name__ == '__main__':
                 
         entity_occur = {}
         collect_ent_occur_from_cooccur(save_cooccur__files, entity_occur)
-        entity_occur = {k:v for k, v in entity_occur.items() if len(v) >= 20}
         my_write_pickle(entity_occur_from_cooccur_file, entity_occur)
+        
+        
+    elif sys.argv[1] == 'collect_pattern_freq':
+        sents = []
+        cooccurs = []
+        for file_idx in range(16):
+            with open(save_sent_files[file_idx]) as f_in:
+                sents.extend(f_in.read().split('\n'))
+            with open(save_cooccur__files[file_idx]) as f_in:
+                cooccurs.extend(f_in.read().split('\n'))
+                
+        with bz2.open(w2vec_dump_file) as f_in:
+            w2vec = Wikipedia2Vec.load(f_in)
+        
+        wiki_path_test_df = pd.DataFrame(process_list(sents, cooccurs, w2vec, batched_feature_process))
+        wiki_path_test_df = filter_unrelated_from_df(wiki_path_test_df, __similar_threshold)
+        wiki_path_test_df.to_csv(path_test_file, sep='\t', columns=feature_columns, index=False)
+        print(len(wiki_path_test_df))
+        c = Counter(wiki_path_test_df['pattern'].to_list())
+        my_write_pickle(path_pattern_count_file, c)
         
         
     elif sys.argv[1] == 'collect_dataset':
@@ -582,12 +762,12 @@ if __name__ == '__main__':
         c, log_max_cnt = load_pattern_freq(path_pattern_count_file)
         
         def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, posfix:str='.dat'):
-            pairs = process_file(save_sent_file, save_cooccur__file, w2vec, posfix)
+            pairs = process_file(save_sent_file, save_cooccur__file, w2vec, batched_feature_process, posfix)
             pairs = [item for item in pairs if 'nsubj' in item[__dep_path]]
             data = pd.DataFrame(pairs)
             data = filter_unrelated_from_df(data, __similar_threshold)
             data = cal_freq_from_df(data, c, log_max_cnt)
-            data = cal_score_from_df(data, __pattern_freq_w, __kw_recall_w, __coverage_w)
+            data = cal_score_from_df(data)
             data.to_csv(save_selected_file, columns=record_columns, sep='\t', index=False)
 
         input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
@@ -627,32 +807,8 @@ if __name__ == '__main__':
         for file in tqdm.tqdm(save_selected_files):
             with open(file) as f_in:
                 data = pd.read_csv(f_in, sep='\t')
-                data = cal_score_from_df(data, __pattern_freq_w, __kw_recall_w, __coverage_w)
+                data = cal_score_from_df(data)
             data.to_csv(file, columns=record_columns, sep='\t', index=False)
-        
-
-    elif sys.argv[1] == 'collect_ent_occur_from_selected':
-        
-        def collect_ent_occur_from_selected(files:list, ent_dict:dict):
-            for file in tqdm.tqdm(files):
-                with open(file) as f_in:
-                    head_idx, tail_idx, sent_idx = -1, -1, -1
-                    for i, line in enumerate(csv.reader(f_in, delimiter='\t')):
-                        if i == 0:
-                            head_idx, tail_idx, sent_idx = line.index(__kw1_ent), line.index(__kw2_ent), line.index(__sent)
-                            continue
-                        head, tail, idx = line[head_idx], line[tail_idx], line[sent_idx]
-                        if head not in ent_dict:
-                            ent_dict[head] = set()
-                        if tail not in ent_dict:
-                            ent_dict[tail] = set()
-                        idx = '%s:%d' % (idx.rsplit(':', 1)[0], i)
-                        ent_dict[head].add(idx)
-                        ent_dict[tail].add(idx)
-                
-        ent_dict = {}
-        collect_ent_occur_from_selected(save_selected_files, ent_dict)
-        my_write_pickle(entity_occur_from_selected_file, ent_dict)
         
         
     elif sys.argv[1] == 'generate_graph':
