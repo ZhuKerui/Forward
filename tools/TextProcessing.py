@@ -8,7 +8,7 @@ import pickle
 from nltk import WordNetLemmatizer, pos_tag, word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
 import spacy
-nlp = spacy.load('en_core_web_sm')
+nlp = spacy.load('en_core_web_lg')
 
 wnl = WordNetLemmatizer()
 
@@ -204,7 +204,7 @@ def batched_sent_tokenize(paragraphs:list):
         content += sent_tokenize(para)
     return content
 
-def find_root_in_span(kw:spacy.tokens.span.Span):
+def find_root_in_span(kw:spacy.tokens.span.Span)->int:
     span_front = kw[0].i
     span_back = kw[-1].i
     root = kw[-1]
@@ -248,7 +248,7 @@ def find_dependency_path_from_tree(doc, kw1:spacy.tokens.span.Span, kw2:spacy.to
         return ' '.join(dep1 + dep2)
 
 
-def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
+def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False, lower:bool=False):
     """
     Find all the occurances of a given phrase in the sentence using spacy.tokens.doc.Doc
 
@@ -267,9 +267,24 @@ def find_span(doc:spacy.tokens.doc.Doc, phrase:str, use_lemma:bool=False):
     -------
     A list of phrases (spacy.tokens.span.Span) found in the doc
     """
-    phrase_tokens = phrase.split()
+    nltk_word_tokenized = word_tokenize(doc.text)
+    nltk_word_tokenized_normalized = ['"' if t == '``' or t == '\'\'' else t for t in nltk_word_tokenized]
+    spacy_word_tokenized = [t.text for t in doc]
+    use_spacy = nltk_word_tokenized_normalized != spacy_word_tokenized
+        
+    if use_spacy:
+        phrase_doc = nlp(phrase)
+        phrase_tokens = [str(t.lemma_ if use_lemma and t.pos_ == 'NOUN' else t) for t in phrase_doc]
+        sent_tokens = [str(t.lemma_ if use_lemma and t.pos_ == 'NOUN' else t) for t in doc]
+    else:
+        phrase_tokens = phrase.replace('-', ' - ').split()
+        sent_tokens = sent_lemmatize(nltk_word_tokenized)
+
     phrase_length = len(phrase_tokens)
-    sent_tokens = [str(t.lemma_ if use_lemma else t) for t in doc]
+    if lower:
+        sent_tokens = [token.lower() for token in sent_tokens]
+        phrase_tokens = [token.lower() for token in phrase_tokens]
+    
     return [doc[i : i + phrase_length] for i in range(len(doc)-phrase_length+1) if phrase_tokens == sent_tokens[i : i + phrase_length]]
 
 

@@ -28,6 +28,7 @@ class FiDDataset(Dataset):
             contexts.append('%s %s %s' % (question, 'path: ' + path if not self.no_path else '', sents if not self.no_sent else ''))
         
         if len(contexts) < self.n_context:
+            print('should not happen')
             if self.duplicate_sample:
                 while len(contexts) < self.n_context:
                     append_list = deepcopy(contexts[:self.n_context - len(contexts)])

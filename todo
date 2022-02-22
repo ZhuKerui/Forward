@@ -1,4 +1,0 @@
-organize openie folder (readme, arange file location)
-check all the use of MyMultiProcessing class (new MyMultiProcessing should be used)
-check whether graph related functions in DocProcessing.py still work (nodes changed from int to str)
-check whether co_occur.ipynb still work, reason same above

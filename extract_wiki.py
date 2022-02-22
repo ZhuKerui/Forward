@@ -8,13 +8,17 @@
 # python extract_wiki.py collect_one_hop_sample_from_single_sent_graph
 # python extract_wiki.py collect_second_level_sample
 
+from copy import deepcopy
 import re
 import os
+import time
 from collections import Counter
 from queue import SimpleQueue
 import json
 import random
+random.seed(0)
 from nltk.tokenize import sent_tokenize
+from scipy import rand
 import tqdm
 import csv
 import networkx as nx
@@ -23,7 +27,7 @@ from urllib.parse import unquote
 import sys
 import linecache
 import numpy as np
-from typing import List
+from typing import List, Tuple
 import bz2
 import itertools
 from wikipedia2vec import Wikipedia2Vec
@@ -50,6 +54,7 @@ wiki_files = []
 save_sent_files = []
 save_cooccur_files = []
 save_cooccur__files = []
+save_pair_files = []
 save_selected_files = []
 save_title_files = []
 
@@ -59,6 +64,7 @@ for i in range(len(wiki_sub_folders)):
     save_sent_files += [os.path.join(save_sub_folders[i], f+'.dat') for f in files]
     save_cooccur_files += [os.path.join(save_sub_folders[i], f+'_co.dat') for f in files]
     save_cooccur__files += [os.path.join(save_sub_folders[i], f+'_co_.dat') for f in files]
+    save_pair_files += [os.path.join(save_sub_folders[i], f+'_pr.dat') for f in files]
     save_selected_files += [os.path.join(save_sub_folders[i], f+'_se.dat') for f in files]
     save_title_files += [os.path.join(save_sub_folders[i], f+'_ti.dat') for f in files]
 
@@ -70,6 +76,7 @@ w2vec_keyword2idx_file = 'data/extract_wiki/w2vec_keyword2idx.pickle'
 entity_occur_from_cooccur_file = 'data/extract_wiki/entity_occur_from_cooccur.pickle'
 path_test_file = 'data/extract_wiki/wiki_sent_test/path_test.tsv'
 path_pattern_count_file = 'data/extract_wiki/path_pattern.pickle'
+sub_path_pattern_count_file = 'data/extract_wiki/sub_path_pattern.pickle'
 
 graph_file = 'data/extract_wiki/graph.pickle'
 single_sent_graph_file = 'data/extract_wiki/single_sent_graph.pickle'
@@ -90,23 +97,23 @@ patterns = [
         ]
         
 # Some private variables
-__const_num = 0.5
-__kw1 = 'kw1'
-__kw2 = 'kw2'
-__kw1_ent = 'kw1_ent'
-__kw2_ent = 'kw2_ent'
-__sent = 'sent'
-__kw1_span = 'kw1_span'
-__kw2_span = 'kw2_span'
-__dep_path = 'dep_path'
-__dep_coverage = 'dep_coverage'
-__sim = 'sim'
-__pattern = 'pattern'
-__pattern_freq = 'pattern_freq'
-__score = 'score'
-__similar_threshold = 0.5
-__max_sentence_length = 50
-__min_sentence_length = 5
+const_num = 0.5
+kw1_str = 'kw1'
+kw2_str = 'kw2'
+kw1_ent_str = 'kw1_ent'
+kw2_ent_str = 'kw2_ent'
+sent_str = 'sent'
+kw1_span_str = 'kw1_span'
+kw2_span_str = 'kw2_span'
+dep_path_str = 'dep_path'
+dep_coverage_str = 'dep_coverage'
+sim_str = 'sim'
+pattern_str = 'pattern'
+pattern_freq_str = 'pattern_freq'
+score_str = 'score'
+similar_threshold = 0.5
+max_sentence_length = 50
+min_sentence_length = 5
 
 # Some task specific classes
 
@@ -218,7 +225,7 @@ def get_ahead(doc, idx):
     return idx
 
 # feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __kw1_full_span, __kw1_recall, __kw2_full_span, __kw2_recall, __dep_coverage, __surface_coverage]
-feature_columns=[__sim, __kw1, __kw1_span, __kw1_ent, __kw2, __kw2_span, __kw2_ent, __sent, __dep_path, __pattern, __dep_coverage]
+feature_columns=[sim_str, kw1_str, kw1_span_str, kw1_ent_str, kw2_str, kw2_span_str, kw2_ent_str, sent_str, dep_path_str, pattern_str, dep_coverage_str]
 
 def get_phrase_full_span(doc, phrase_span):
     phrase_right_most = get_back(doc, phrase_span[-1].i)
@@ -226,7 +233,7 @@ def get_phrase_full_span(doc, phrase_span):
     return (phrase_left_most, phrase_right_most)
 
 def cal_kw_recall(kw:str, full_phrase:str):
-    return np.log(kw.count(' ') + 1 + __const_num) / np.log(full_phrase.count(' ') + 1 + __const_num)
+    return np.log(kw.count(' ') + 1 + const_num) / np.log(full_phrase.count(' ') + 1 + const_num)
 
 def generate_clean_phrase(phrase:str):
     return ' '.join(re.sub(r'[^a-z0-9\s]', '', phrase).split())
@@ -250,47 +257,82 @@ def sentence_decompose(doc, kw1:str, kw2:str):
             pattern = gen_pattern(path)
             if not pattern.startswith('i_nsubj'):
                 continue
-            data.append((kw1_span, kw2_span, branch, pattern))
+            data.append((kw1_span, kw2_span, branch, path, pattern))
     return data
 
 
-def feature_process(doc, kw1:str, kw2:str)->List[dict]:
-    data = []
-    for kw1_span, kw2_span, branch, pattern in sentence_decompose(doc, kw1, kw2):
-        expand_dependency_info_from_tree(doc, branch)
-        data.append({__kw1_span : (kw1_span[0].i, kw1_span[-1].i),
-                     __kw2_span : (kw2_span[0].i, kw2_span[-1].i),
-                     __pattern : pattern, 
-                     __dep_coverage : branch.mean()
-                    })
-    return data
+class FeatureProcess:
+    def __init__(self, sub_path_pattern_file:str):
+        c, log_max_cnt = load_pattern_freq(sub_path_pattern_file)
+        self.c = c
+        self.log_max_cnt = log_max_cnt
+        
+    
+    def expand_dependency_info_from_tree(self, doc, path:np.ndarray):
+        dep_path:list = (np.arange(*path.shape)[path!=0]).tolist()
+        for element in dep_path:
+            if doc[element].dep_ == 'conj':
+                path[doc[element].head.i] = 0
+        paths = collect_sub_dependency_path(doc, path)
+        paths = [item for item in paths if item[1].split()[0] in modifier_dependencies]
+        for p in paths:
+            pattern = gen_sub_dep_path_pattern(p[1])
+            if pattern == '':
+                path[p[2]] = path[p[0]]
+            else:
+                path[p[2]] = cal_freq_from_path(pattern, self.c, self.log_max_cnt)
+            
+    def feature_process(self, doc, kw1:str, kw2:str)->List[dict]:
+        data = []
+        punct_mask = np.array([token.dep_ != 'punct' for token in doc])
+        for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
+            self.expand_dependency_info_from_tree(doc, branch)
+            data.append({kw1_span_str : (kw1_span[0].i, kw1_span[-1].i),
+                         kw2_span_str : (kw2_span[0].i, kw2_span[-1].i),
+                         pattern_str : pattern, 
+                         dep_path_str : path, 
+                         dep_coverage_str : branch[punct_mask].mean()
+                        })
+        return data
+    
+    def batched_feature_process(self, sent:str, pairs):
+        data = []
+        doc = nlp(sent)
+        if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
+            return []
+        for item in pairs:
+            # Calculate calculate dependency coverage
+            temp_data = self.feature_process(doc, item[kw1_str], item[kw2_str])
+            for d in temp_data:
+                d.update(item)
+            data.extend(temp_data)
+        return data
 
+
+def gen_sub_dep_path_pattern(path:str):
+    return ' '.join(path.replace('compound', '').replace('conj', '').replace('appos', '').split())
 
 def collect_sub_dep_path(doc, kw1:str, kw2:str)->List[dict]:
     data = []
-    for kw1_span, kw2_span, branch, pattern in sentence_decompose(doc, kw1, kw2):
+    for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
         ans = [str(item[1]) for item in collect_sub_dependency_path(doc, branch)]
-        ans = [item.replace('compound', '').replace('conj', '').replace('appos', '') for item in ans if item != 'punct']
+        ans = [gen_sub_dep_path_pattern(item) for item in ans if 'punct' not in item]
+        ans = [item for item in ans if item]
         data.extend(ans)
     return data
 
 
-def batched_feature_process(doc, pairs):
+def batched_collect_sub_dep_path(sent, pairs):
     data = []
+    pairs = [item for item in pairs if item[sim_str] >= similar_threshold]
+    if not pairs:
+        return []
+    doc = nlp(sent)
+    if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
+        return []
     for item in pairs:
         # Calculate calculate dependency coverage
-        temp_data = feature_process(doc, item[__kw1], item[__kw2])
-        for d in temp_data:
-            d.update(item)
-        data.extend(temp_data)
-    return data
-
-
-def batched_collect_sub_dep_path(doc, pairs):
-    data = []
-    for item in pairs:
-        # Calculate calculate dependency coverage
-        temp_data = collect_sub_dep_path(doc, item[__kw1], item[__kw2])
+        temp_data = collect_sub_dep_path(doc, item[kw1_str], item[kw2_str])
         data.extend(temp_data)
     return data
 
@@ -317,64 +359,45 @@ def gen_pattern(path:str):
     return ' '.join(path_)
 
 
-def process_line(sent:str, ents:list, w2vec:Wikipedia2Vec, sent_note:str, processor):
-    co_kws = []
-    matrix = []
-    for ent in ents:
-        try:
-            vec = w2vec.get_entity_vector(ent)
-            matrix.append(vec)
-            co_kws.append(gen_kw_from_wiki_ent(ent))
-        except:
-            pass
-    certain_len = len(co_kws)
-    if certain_len <= 1:
-        return []
+def process_line(sent:str, tups:List[Tuple[float, str, str]], sent_note:str, processor):
     
-    pairs = []
-    # Collect pairs between certain entities
-    matrix = np.array(matrix)
-    result = cosine_similarity(matrix, matrix)
-    for i in range(certain_len):
-        for j in range(i+1, certain_len):
-            pairs.append({__kw1:co_kws[i], __kw2:co_kws[j], __sim:float(result[i, j]), __sent:sent_note, __kw1_ent:ents[i], __kw2_ent:ents[j]})
-    doc = nlp(sent)
-    if len(doc) > __max_sentence_length or len(doc) < __min_sentence_length:
-        return []
-    return processor(doc, pairs)
+    pairs = [{kw1_str:gen_kw_from_wiki_ent(tup[1], False), kw2_str:gen_kw_from_wiki_ent(tup[2], False), sim_str:tup[0], sent_str:sent_note, kw1_ent_str:tup[1], kw2_ent_str:tup[2]} for tup in tups]
+    return processor(sent, pairs)
     
     
-def process_list(sents:List[str], cooccurs:List[str], w2vec:Wikipedia2Vec, processor):
+def process_list(sents:List[str], pairs_list:List[str], processor):
     data = []
-    for line_idx, line in enumerate(tqdm.tqdm(cooccurs)):
-        line = line.split('\t')
-        if len(line) <= 1:
+    for line_idx, pairs in enumerate(tqdm.tqdm(pairs_list)):
+        if not pairs:
             continue
-        data.extend(process_line(sents[line_idx], line, w2vec, sents[line_idx], processor))
+        pairs = pairs.split('\t')
+        tups = [eval(pair) for pair in pairs]
+        data.extend(process_line(sents[line_idx], tups, sents[line_idx], processor))
     return data
 
 
-def process_file(save_sent_file:str, save_cooccur__file:str, w2vec:Wikipedia2Vec, processor, posfix:str='.dat'):
+def process_file(save_sent_file:str, save_pair_file:str, processor, posfix:str='.dat'):
     # Build test data
     with open(save_sent_file) as f_in:
         sents = f_in.read().split('\n')
-    with open(save_cooccur__file) as f_in:
+    with open(save_pair_file) as f_in:
         cooccurs = f_in.read().split('\n')
     data = []
-    for line_idx, line in enumerate(cooccurs):
-        line = line.split('\t')
-        if len(line) <= 1:
+    for line_idx, pairs in enumerate(cooccurs):
+        if not pairs:
             continue
+        pairs = pairs.split('\t')
+        tups = [eval(pair) for pair in pairs]
         sent_note = line2note(save_sent_file, line_idx, posfix=posfix)
-        data += process_line(sents[line_idx], line, w2vec, sent_note, processor)
+        data.extend(process_line(sents[line_idx], tups, sent_note, processor))
     return data
 
 
-record_columns = feature_columns + [__pattern_freq, __score]
+record_columns = feature_columns + [pattern_freq_str, score_str]
 
 
 def filter_unrelated_from_df(df:pd.DataFrame, similar_threshold):
-    return df[df[__sim] >= similar_threshold]
+    return df[df[sim_str] >= similar_threshold]
 
 
 def cal_freq_from_path(path:str, c:Counter, log_max_cnt:float):
@@ -391,7 +414,7 @@ def load_pattern_freq(path_pattern_count_file_:str):
 
 
 def cal_freq_from_df(df:pd.DataFrame, c:Counter, log_max_cnt:float):
-    return df.assign(pattern_freq = df.apply(lambda x: cal_freq_from_path(x[__pattern], c, log_max_cnt), axis=1))
+    return df.assign(pattern_freq = df.apply(lambda x: cal_freq_from_path(x[pattern_str], c, log_max_cnt), axis=1))
 
 
 def cal_score_from_df(df:pd.DataFrame):
@@ -399,7 +422,7 @@ def cal_score_from_df(df:pd.DataFrame):
     def cal_score(pattern_freq:float, dep_coverage:float):
         return 2 / ((1/pattern_freq)+(1/dep_coverage))
 
-    sub_df = df.assign(score = df.apply(lambda x: cal_score(x[__pattern_freq], x[__dep_coverage]), axis=1))
+    sub_df = df.assign(score = df.apply(lambda x: cal_score(x[pattern_freq_str], x[dep_coverage_str]), axis=1))
     return sub_df
 
 
@@ -430,92 +453,90 @@ def find_triangles(graph:nx.Graph, node:str):
     return triangles
 
 
-def find_path_between_pair(graph:nx.Graph, first_node:str, second_node:str, hop_num:int=1, max_path_num:int=-1):
+def find_path_between_pair(graph:nx.Graph, first_node:str, second_node:str, hop_num:int=1):
+    first_neighbors = set(graph.neighbors(first_node))
+    first_neighbors.remove(second_node)
+    second_neighbors = set(graph.neighbors(second_node))
+    second_neighbors.remove(first_node)
     if hop_num == 1:
-        one_hop_nodes = list(set(graph.neighbors(first_node)) & set(graph.neighbors(second_node)))
-        ret = [[first_node, node, second_node] for node in one_hop_nodes]
-        if max_path_num > 0 and len(ret) > max_path_num:
-            ret = ret[:max_path_num]
+        return [[first_node, node, second_node] for node in (first_neighbors & second_neighbors)]
     else:
-        possible_paths = SimpleQueue()
-        possible_paths.put([first_node])
-        ret = []
-        for i in range(hop_num+1):
-            path_num = possible_paths.qsize()
-            for path_idx in range(path_num):
-                path = possible_paths.get()
-                for neighbor in graph.neighbors(path[-1]):
-                    if neighbor not in path:
-                        new_path = path + [neighbor]
-                        if neighbor == second_node:
-                            ret.append(new_path)
-                            if max_path_num > 0 and len(ret) >= max_path_num:
-                                return ret
-                        else:
-                            possible_paths.put(new_path)
-    return ret
+        return [[first_node, first_neighbor, second_neighbor, second_node] for first_neighbor in first_neighbors for second_neighbor in second_neighbors if graph.has_edge(first_neighbor, second_neighbor)]
+    # else:
+    #     possible_paths = SimpleQueue()
+    #     possible_paths.put([first_node])
+    #     ret = []
+    #     for i in range(hop_num+1):
+    #         path_num = possible_paths.qsize()
+    #         for path_idx in range(path_num):
+    #             path = possible_paths.get()
+    #             for neighbor in graph.neighbors(path[-1]):
+    #                 if neighbor not in path:
+    #                     new_path = path + [neighbor]
+    #                     if neighbor == second_node and len(new_path) > 2:
+    #                         ret.append(new_path)
+    #                         if max_path_num > 0 and len(ret) >= max_path_num:
+    #                             return ret
+    #                     else:
+    #                         possible_paths.put(new_path)
+    #     return ret
 
 
 def find_all_triangles(graph:nx.Graph):
     return set(frozenset([n,nbr,nbr2]) for n in tqdm.tqdm(graph) for nbr, nbr2 in itertools.combinations(graph[n],2) if nbr in graph[nbr2])
 
 
-def generate_sample(graph:nx.Graph, ent1:str, ent2:str, hop_num:int=1, max_path_num:int=-1):
-    target = graph.get_edge_data(ent1, ent2) if graph.has_edge(ent1, ent2) else None
+def generate_sample(graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, min_path_num:int=5):
+    target = graph.get_edge_data(ent1, ent2)
     if not target:
         return None
-    paths = find_path_between_pair(graph, ent1, ent2, hop_num=hop_num, max_path_num=max_path_num)
-    if not paths:
+    hop_num = 1
+    triples = []
+    target_note = target['note']
+    while hop_num<=max_hop_num:
+        paths = find_path_between_pair(graph, ent1, ent2, hop_num=hop_num)
+        paths = [{'path' : path} for path in paths]
+        for item in paths:
+            path = item['path']
+            temp_sum = 0
+            for i in range(len(path)-1):
+                temp_sum += 1 / graph.get_edge_data(path[i], path[i+1])['score']
+            item['score'] = (len(path)-1) / temp_sum
+        paths.sort(key=lambda x: x['score'], reverse=True)
+        for item in paths:
+            path = item['path']
+            bad_path = False
+            temp_path = []
+            for i in range(len(path)-1):
+                tri = {'e1' : path[i], 'e2' : path[i+1], 'pid' : len(triples)}
+                tri.update(graph.get_edge_data(path[i], path[i+1]))
+                temp_path.append(tri)
+                if tri['note'] == target_note:
+                    bad_path = True
+                    break
+            if not bad_path:
+                triples.append(temp_path)
+            if len(triples) >= min_path_num:
+                break
+        if len(triples) >= min_path_num:
+            break
+        hop_num += 1
+    if len(triples) < min_path_num:
         return None
     entity = set()
-    for path in paths:
-        entity.update(path)
-    entity = list(entity)
-    triples = []
-    target:list = target['data']
-    target.sort(key=lambda x: x[0], reverse=True)
-    target_note = target[0][1]
-    for path in paths:
-        idx_path = [entity.index(i) for i in path]
-        sents = [(
-            graph.get_edge_data(path[i], path[i+1])['data'],
-            (idx_path[i], idx_path[i+1])
-            )for i in range(len(path)-1)]
-        temp_triples = []
-        sent_in_use = set([target_note])
-        sents.sort(key=lambda x: len(x[0]))
-        note_found = False
-        for sent_item in sents:
-            sent_item[0].sort(key=lambda x: x[0], reverse=True)
-            note_found = False
-            for note_item in sent_item[0]:
-                if note_item[1] not in sent_in_use:
-                    sent_in_use.add(note_item[1])
-                    temp_triples.append({'e1' : sent_item[1][0],
-                                         'e2' : sent_item[1][1],
-                                         'sent' : note_item[1], 
-                                         'score' : note_item[0], 
-                                         'span' : note_item[2],
-                                         'pid' : len(triples)})
-                    note_found = True
-                    break
-            if not note_found:
-                break
-        if not note_found:
-            continue
-        re_ordered_temp_triples = [{} for i in range(len(path)-1)]
-        for item in temp_triples:
-            re_ordered_temp_triples[idx_path.index(item['e1'])] = item
-        triples.append(re_ordered_temp_triples)
-    if not triples:
-        return None
     source = set()
     for path in triples:
-        source.update([item['sent'] for item in path])
+        source.update([tri['note'] for tri in path])
+        entity.update([tri['e1'] for tri in path])
+        entity.update([tri['e2'] for tri in path])
+    entity = list(entity)
     source = list(source)
     for path in triples:
-        for item in path:
-            item['sent'] = source.index(item['sent'])
+        for tri in path:
+            tri['sent'] = source.index(tri['note'])
+            tri['e1'] = entity.index(tri['e1'])
+            tri['e2'] = entity.index(tri['e2'])
+            tri.pop('note')
     source = [note2line(note).strip() for note in source]
     return {'pair' : (ent1, ent2), 
             'entity' : entity, 
@@ -569,24 +590,29 @@ def generate_second_level_sample(sample:dict):
 
 def sample_to_neo4j(sample:dict):
     cmd = ['MATCH (n) DETACH DELETE (n);']
+    create_cmd = []
+    match_cmd = []
     for ent in sample['pair']:
-        cmd.append('CREATE (:ENT:TARGET {ent:"%s"});' % ent)
+        create_cmd.append('CREATE (:ENT:TARGET {ent:"%s"});' % ent)
     for ent in sample['entity']:
         if ent not in sample['pair']:
-            cmd.append('CREATE (:ENT:INTERMEDIA {ent:"%s"});' % ent)
+            create_cmd.append('CREATE (:ENT:INTERMEDIA {ent:"%s"});' % ent)
     for path in sample['triple']:
         for tri in path:
             ent1 = sample['entity'][tri['e1']]
             ent2 = sample['entity'][tri['e2']]
             sent = sample['source'][tri['sent']]
             score = tri['score']
-            cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:Sent {sent:"%s", pair:"%s <-> %s", score:%.3f}]->(ent2);' % (ent1, ent2, sent, ent1, ent2, score))
-    cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:OUT {sent:"%s", pair:"%s <-> %s"}]->(ent2);' % (*sample['pair'], sample['target'], *sample['pair']))
+            match_cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:Sent {sent:"%s", pair:"%s <-> %s", score:%.3f}]->(ent2);' % (ent1, ent2, sent.replace('"', '\\"'), ent1, ent2, score))
+    match_cmd = list(set(match_cmd))
+    cmd.extend(create_cmd)
+    cmd.extend(match_cmd)
+    cmd.append('MATCH (ent1:ENT {ent:"%s"}), (ent2:ENT {ent:"%s"}) CREATE (ent1)-[:OUT {sent:"%s", pair:"%s <-> %s"}]->(ent2);' % (*sample['pair'], sample['target'].replace('"', '\\"'), *sample['pair']))
     print('\n'.join(cmd))
 
 
-modifier_dependencies = {'acl', 'advcl', 'advmod', 'amod', 'det', 'mark', 'meta', 'neg', 'nn', 'nmod', 'npmod', 'nummod', 'poss', 'prep', 'quantmod', 'relcl'}
-adjunctive_dependencies = {'appos', 'aux', 'auxpass', 'compound', 'cop', 'expl', 'punct', 'nsubj', 'dobj'}
+modifier_dependencies = {'acl', 'advcl', 'advmod', 'amod', 'det', 'mark', 'meta', 'neg', 'nn', 'nmod', 'npmod', 'nummod', 'poss', 'prep', 'quantmod', 'relcl',
+                         'appos', 'aux', 'auxpass', 'compound', 'cop', 'ccomp', 'xcomp', 'expl', 'punct', 'nsubj', 'csubj', 'csubjpass', 'dobj', 'iobj', 'obj', 'pobj'}
 
 def expand_dependency_info_from_tree(doc, path:np.ndarray):
     dep_path:list = (np.arange(*path.shape)[path!=0]).tolist()
@@ -598,7 +624,7 @@ def expand_dependency_info_from_tree(doc, path:np.ndarray):
         for child in doc[element].children:
             if path[element] == 0 and child.dep_ == 'compound':
                 continue
-            if path[child.i] == 0 and (child.dep_ in modifier_dependencies or child.dep_ in adjunctive_dependencies):
+            if path[child.i] == 0 and child.dep_ in modifier_dependencies:
                 path[child.i] = 1
                 modifiers.append(child.i)
     while len(modifiers) > 0:
@@ -680,11 +706,13 @@ def collect_sub_dependency_path(doc, branch:np.ndarray):
             temp_paths.extend([(item[0], item[1] + ' ' + child.dep_, child.i) for child in doc[item[2]].children if branch[child.i] == 0])
     return paths
 
-def informativeness_demo(sent:str, kw1:str, kw2:str):
+
+def informativeness_demo(sent:str, kw1:str, kw2:str, fp:FeatureProcess):
     doc = nlp(sent)
     kw1_span = find_span(doc, kw1, True, True)[0]
     kw2_span = find_span(doc, kw2, True, True)[0]
-    path = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
+    kw1_steps, kw2_steps, path = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
+    fp.expand_dependency_info_from_tree(doc, path)
     context = []
     temp = []
     for i, checked in enumerate(path):
@@ -696,9 +724,24 @@ def informativeness_demo(sent:str, kw1:str, kw2:str):
                 temp = []
     if temp:
         context.append(' '.join(temp))
-    return context
+    return pd.DataFrame({i:[doc[i].text, np.round(path[i], 3)] for i in range(len(doc))})
 
 
+def generate_single_sent_graph(graph:nx.Graph, score_threshold:float):
+        single_sent_g = nx.Graph()
+        for edge in tqdm.tqdm(graph.edges):
+            data = graph.get_edge_data(*edge)
+            sim = data['sim']
+            data = data['data']
+            best_score, best_note, best_span, best_dep_coverage, best_pattern_freq = data[0]
+            for score, note, span, dep_coverage, pattern_freq in data:
+                if score > best_score:
+                    best_score, best_note, best_span, best_dep_coverage, best_pattern_freq = score, note, span, dep_coverage, pattern_freq
+            if best_score >= score_threshold:
+                single_sent_g.add_edge(*edge, score=best_score, note=best_note, sim=sim, span=best_span, significant=best_dep_coverage, explict=best_pattern_freq)
+        return single_sent_g
+        
+        
 if __name__ == '__main__':
     # Generate the save dir
     if not os.path.exists(save_path):
@@ -713,7 +756,113 @@ if __name__ == '__main__':
         wiki_sent_pair = [(wiki_files[i], save_sent_files[i], save_cooccur_files[i], save_title_files[i]) for i in range(len(wiki_files))]
         output = p.run(get_sentence, wiki_sent_pair)
         
+        # Collect wikipedia entities
+        wikipedia_entity = set()
+        for f in tqdm.tqdm(save_title_files):
+            with open(f) as f_in:
+                wikipedia_entity.update(f_in.read().split('\n'))
+        print(len(wikipedia_entity))
+        my_write(wikipedia_entity_file, list(wikipedia_entity))
+        
     
+    elif sys.argv[1] == 'correct_mapping_in_cooccur':
+        
+        # Load wikipedia2vec
+        with bz2.open(w2vec_dump_file) as f_in:
+            w2vec = Wikipedia2Vec.load(f_in)
+    
+        # Load wikipedia entities
+        with open(wikipedia_entity_file) as f_in:
+            wikipedia_entity = set(f_in.read().split('\n'))
+    
+        # Generate lower-cased entity to original entity mapping
+        print('Generate lower-cased entity to original entity mapping')
+        wikipedia_entity_low2orig_map = {}
+        for ent in wikipedia_entity:
+            ent_low = ent.lower()
+            if ent_low not in wikipedia_entity_low2orig_map:
+                wikipedia_entity_low2orig_map[ent_low] = []
+            wikipedia_entity_low2orig_map[ent_low].append(ent)
+
+        # Correct mapping
+        print('Correct mapping')
+        for i in tqdm.tqdm(range(len(save_cooccur_files))):
+            with open(save_cooccur_files[i]) as f_in:
+                new_file_lines = []
+                for line_idx, line in enumerate(f_in):
+                    line = line.strip()
+                    entities = line.split('\t')
+                    new_entities = []
+                    for ent in entities:
+                        if ent in wikipedia_entity:
+                            new_entities.append(ent)
+                        else:
+                            ent_low = ent.lower()
+                            if ent_low in wikipedia_entity_low2orig_map:
+                                candidates = wikipedia_entity_low2orig_map[ent_low]
+                                if len(candidates) == 1:
+                                    new_entities.append(candidates[0])
+                                else:
+                                    note = line2note(save_cooccur_files[i], line_idx, '_co.dat')
+                                    page_title = note2line(note, '_ti.dat').strip()
+                                    try:
+                                        page_ent_vec = w2vec.get_entity_vector(page_title)
+                                    except:
+                                        continue
+                                    most_similar_idx, most_similar_val = -1, -1
+                                    for candidate_idx, candidate_ent in enumerate(candidates):
+                                        try:
+                                            candidate_vec = w2vec.get_entity_vector(candidate_ent)
+                                        except:
+                                            continue
+                                        similar_val = cosine_similarity(page_ent_vec.reshape(1, -1), candidate_vec.reshape(1, -1))[0,0]
+                                        if similar_val > most_similar_val:
+                                            most_similar_val = similar_val
+                                            most_similar_idx = candidate_idx
+                                    if most_similar_idx >= 0:
+                                        new_entities.append(candidates[most_similar_idx])
+                    new_file_lines.append('\t'.join(new_entities))
+                my_write(save_cooccur__files[i], new_file_lines)
+                
+                
+    elif sys.argv[1] == 'cal_cooccur_similarity':
+        
+        # Load wikipedia2vec
+        with bz2.open(w2vec_dump_file) as f_in:
+            w2vec = Wikipedia2Vec.load(f_in)
+        
+        for f_id, save_cooccur__file in enumerate(tqdm.tqdm(save_cooccur__files)):
+            with open(save_cooccur__file) as f_in:
+                cooccurs = f_in.read().split('\n')
+            data = []
+            for line in cooccurs:
+                ents = line.split('\t')
+                if len(ents) <= 1:
+                    data.append('')
+                else:
+                    temp_data = []
+                    valid_entities = []
+                    matrix = []
+                    for ent in ents:
+                        try:
+                            vec = w2vec.get_entity_vector(ent)
+                            matrix.append(vec)
+                            valid_entities.append(ent)
+                        except:
+                            pass
+                    certain_len = len(valid_entities)
+                    if certain_len >= 2:
+                        # Collect pairs between certain entities
+                        matrix = np.array(matrix)
+                        result = cosine_similarity(matrix, matrix)
+                        for i in range(certain_len):
+                            for j in range(i+1, certain_len):
+                                tup = (float(result[i, j]), valid_entities[i], valid_entities[j])
+                                temp_data.append(str(tup))
+                    data.append('\t'.join(temp_data))
+            my_write(save_pair_files[f_id], data)
+            
+            
     elif sys.argv[1] == 'collect_ent_occur_from_cooccur':
         
         def collect_ent_occur_from_cooccur(files:list, keyword_dict:dict):
@@ -734,20 +883,38 @@ if __name__ == '__main__':
         my_write_pickle(entity_occur_from_cooccur_file, entity_occur)
         
         
-    elif sys.argv[1] == 'collect_pattern_freq':
+    elif sys.argv[1] == 'collect_sub_path_pattern_freq':
+        
         sents = []
-        cooccurs = []
-        for file_idx in range(16):
+        pairs_list = []
+        for file_idx in range(50):
             with open(save_sent_files[file_idx]) as f_in:
                 sents.extend(f_in.read().split('\n'))
-            with open(save_cooccur__files[file_idx]) as f_in:
-                cooccurs.extend(f_in.read().split('\n'))
-                
-        with bz2.open(w2vec_dump_file) as f_in:
-            w2vec = Wikipedia2Vec.load(f_in)
+            with open(save_pair_files[file_idx]) as f_in:
+                pairs_list.extend(f_in.read().split('\n'))
         
-        wiki_path_test_df = pd.DataFrame(process_list(sents, cooccurs, w2vec, batched_feature_process))
-        wiki_path_test_df = filter_unrelated_from_df(wiki_path_test_df, __similar_threshold)
+        c = Counter(process_list(sents, pairs_list, batched_collect_sub_dep_path))
+        my_write_pickle(sub_path_pattern_count_file, c)
+        
+        
+    elif sys.argv[1] == 'collect_pattern_freq':
+        
+        sents = []
+        pairs_list = []
+        for file_idx in range(50):
+            with open(save_sent_files[file_idx]) as f_in:
+                sents.extend(f_in.read().split('\n'))
+            with open(save_pair_files[file_idx]) as f_in:
+                pairs_list.extend(f_in.read().split('\n'))
+        
+        # with open('data/extract_wiki/wiki_sent_collect/BE/wiki_15.dat') as f_in:
+        #     sents.extend(f_in.read().split('\n'))
+        # with open('data/extract_wiki/wiki_sent_collect/BE/wiki_15_pr.dat') as f_in:
+        #     pairs_list.extend(f_in.read().split('\n'))
+        fp = FeatureProcess(sub_path_pattern_count_file)
+        
+        wiki_path_test_df = pd.DataFrame(process_list(sents, pairs_list, fp.batched_feature_process))
+        wiki_path_test_df = filter_unrelated_from_df(wiki_path_test_df, similar_threshold)
         wiki_path_test_df.to_csv(path_test_file, sep='\t', columns=feature_columns, index=False)
         print(len(wiki_path_test_df))
         c = Counter(wiki_path_test_df['pattern'].to_list())
@@ -755,24 +922,59 @@ if __name__ == '__main__':
         
         
     elif sys.argv[1] == 'collect_dataset':
-
-        with bz2.open(w2vec_dump_file) as f_in:
-            w2vec = Wikipedia2Vec.load(f_in)
         
         c, log_max_cnt = load_pattern_freq(path_pattern_count_file)
+        fp = FeatureProcess(sub_path_pattern_count_file)
         
-        def collect_dataset(save_sent_file:str, save_cooccur__file:str, save_selected_file, posfix:str='.dat'):
-            pairs = process_file(save_sent_file, save_cooccur__file, w2vec, batched_feature_process, posfix)
-            pairs = [item for item in pairs if 'nsubj' in item[__dep_path]]
+        def collect_dataset(save_sent_file:str, save_pair_file:str, save_selected_file, posfix:str='.dat'):
+            pairs = process_file(save_sent_file, save_pair_file, fp.batched_feature_process, posfix)
+            pairs = [item for item in pairs if 'nsubj' in item[dep_path_str]]
             data = pd.DataFrame(pairs)
-            data = filter_unrelated_from_df(data, __similar_threshold)
+            # data = filter_unrelated_from_df(data, similar_threshold)
             data = cal_freq_from_df(data, c, log_max_cnt)
             data = cal_score_from_df(data)
             data.to_csv(save_selected_file, columns=record_columns, sep='\t', index=False)
 
-        input_list = [(save_sent_files[i], save_cooccur__files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
+        input_list = [(save_sent_files[i], save_pair_files[i], save_selected_files[i]) for i in range(len(save_sent_files))]
         _ = p.run(collect_dataset, input_list)
         
+        # for i in range(2):
+        #     collect_dataset(save_sent_files[i], save_pair_files[i], save_selected_files[i])
+        
+        
+    elif sys.argv[1] == 'generate_graph':
+        
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        def generate_graph(files:list, sim_threshold:float):
+            g = nx.Graph()
+            for file in tqdm.tqdm(files):
+                with open(file) as f_in:
+                    head_idx, tail_idx, sent_idx, score_idx, sim_idx = -1, -1, -1, -1, -1
+                    for i, line in enumerate(csv.reader(f_in, delimiter='\t')):
+                        if i == 0:
+                            head_idx, tail_idx, sent_idx, score_idx, sim_idx, head_span_idx, tail_span_idx, dep_coverage_idx, pattern_freq_idx = line.index(kw1_ent_str), line.index(kw2_ent_str), line.index(sent_str), line.index(score_str), line.index(sim_str), line.index(kw1_span_str), line.index(kw2_span_str), line.index(dep_coverage_str), line.index(pattern_freq_str)
+                            continue
+                        sim = float(line[sim_idx])
+                        if sim < sim_threshold:
+                            continue
+                        if not g.has_edge(line[head_idx], line[tail_idx]):
+                            g.add_edge(line[head_idx], line[tail_idx], sim = sim, data = [(float(line[score_idx]), line[sent_idx], (line[head_span_idx], line[tail_span_idx]), float(line[dep_coverage_idx]), float(line[pattern_freq_idx]))])
+                        else:
+                            data = g.get_edge_data(line[head_idx], line[tail_idx])
+                            data['data'].append((float(line[score_idx]), line[sent_idx], (line[head_span_idx], line[tail_span_idx]), float(line[dep_coverage_idx]), float(line[pattern_freq_idx])))
+            return g
+
+        graph = generate_graph(save_selected_files, similar_threshold)
+        my_write_pickle(graph_file, graph)
+        
+    
+    elif sys.argv[1] == 'generate_single_sent_graph':
+        
+        # Load keyword occur dict which has occurance record for all keywords in selected sentences
+        graph = my_read_pickle(graph_file)
+        single_sent_g = generate_single_sent_graph(graph, 0.6)
+        my_write_pickle(single_sent_graph_file, single_sent_g)
+            
         
     elif sys.argv[1] == 'collect_score_function_eval_dataset':
         
@@ -809,80 +1011,24 @@ if __name__ == '__main__':
                 data = pd.read_csv(f_in, sep='\t')
                 data = cal_score_from_df(data)
             data.to_csv(file, columns=record_columns, sep='\t', index=False)
-        
-        
-    elif sys.argv[1] == 'generate_graph':
-        
-        # Load keyword occur dict which has occurance record for all keywords in selected sentences
-        def generate_graph(files:list, threshold:float):
-            g = nx.Graph()
-            for file in tqdm.tqdm(files):
-                with open(file) as f_in:
-                    head_idx, tail_idx, sent_idx, score_idx, sim_idx = -1, -1, -1, -1, -1
-                    for i, line in enumerate(csv.reader(f_in, delimiter='\t')):
-                        if i == 0:
-                            head_idx, tail_idx, sent_idx, score_idx, sim_idx, head_span_idx, tail_span_idx = line.index(__kw1_ent), line.index(__kw2_ent), line.index(__sent), line.index(__score), line.index(__sim), line.index(__kw1_span), line.index(__kw2_span)
-                            continue
-                        score = float(line[score_idx])
-                        if score < threshold:
-                            continue
-                        if not g.has_edge(line[head_idx], line[tail_idx]):
-                            g.add_edge(line[head_idx], line[tail_idx], sim = float(line[sim_idx]), data = [(score, line[sent_idx], (line[head_span_idx], line[tail_span_idx]))])
-                        else:
-                            data = g.get_edge_data(line[head_idx], line[tail_idx])
-                            data['data'].append((score, line[sent_idx], (line[head_span_idx], line[tail_span_idx])))
-            return g
-
-        # graph = generate_graph(save_selected_files, 0.6)
-        graph = generate_graph(save_selected_files, 0.3)
-        my_write_pickle(graph_file, graph)
             
-            
-    elif sys.argv[1] == 'generate_single_sent_graph':
+    
+    elif sys.argv[1] == 'collect_sample_from_single_sent_graph':
         
-        # Load keyword occur dict which has occurance record for all keywords in selected sentences
-        def generate_single_sent_graph(graph:nx.Graph):
-            single_sent_g = nx.Graph()
-            for edge in tqdm.tqdm(graph.edges):
-                data = graph.get_edge_data(*edge)
-                sim = data['sim']
-                data = data['data']
-                best_score, best_note, best_span = data[0]
-                for score, note, span in data:
-                    if score > best_score:
-                        best_score = score
-                        best_note = note
-                        best_span = span
-                single_sent_g.add_edge(*edge, score=best_score, note=best_note, sim=sim, span=best_span)
-            return single_sent_g
-
-        graph = my_read_pickle(graph_file)
-            
-        single_sent_g = generate_single_sent_graph(graph)
-        my_write_pickle(single_sent_graph_file, single_sent_g)
-            
-
-    elif sys.argv[1] == 'collect_one_hop_sample_from_single_sent_graph':
-        
-        single_sent_graph:nx.Graph = my_read_pickle(single_sent_graph_file)
-        graph:nx.Graph = my_read_pickle(graph_file)
-        
-        target_edges = [edge for edge in single_sent_graph.edges if single_sent_graph.get_edge_data(*edge)['score'] > 0.8]
-        # target_sent_graph = graph.edge_subgraph(edges)
+        context_sent_score_threshold = 0.6
+        target_edges = list(my_read_pickle(single_sent_graph_file).edges)
+        source_sent_g = my_read_pickle(graph_file)
+        source_sent_g:nx.Graph = generate_single_sent_graph(source_sent_g, context_sent_score_threshold)
         
         sample_num = -1
         samples = []
         print(len(target_edges))
-        status_bar = tqdm.tqdm(total=min(sample_num, len(target_edges)) if sample_num > 0 else len(target_edges))
         edge_count = 0
-        # input_list = [(graph, edge[0], edge[1], 1) for edge in target_edges[:sample_num]]
-        for edge_idx, edge in enumerate(target_edges):
+        for edge_idx, edge in enumerate(tqdm.tqdm(target_edges)):
             edge_count += 1
-            sample = generate_sample(graph, edge[0], edge[1], 1, 10)
-            if sample is not None:
+            sample = generate_sample(source_sent_g, edge[0], edge[1])
+            if sample:
                 samples.append(sample)
-                if edge_idx % 20 == 0:
-                    status_bar.update(20)
             if (sample_num > 0) and (len(samples) >= sample_num):
                 break
         print(len(samples) * 1.0 / edge_count)

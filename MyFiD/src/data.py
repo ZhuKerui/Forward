@@ -1,7 +1,9 @@
 from typing import List
-from statistics import mean
 import json
 import torch
+
+def my_mean(nums:List[int]):
+    return len(nums)/sum([1/num for num in nums])
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self,
@@ -22,9 +24,9 @@ class Dataset(torch.utils.data.Dataset):
             sources:List[str] = sample['source']
             entity:List[str] = sample['entity']
             triple:list = sample['triple']
-            avg_scores = [mean([tri['score'] for tri in path]) for path in triple]
-            sorted_list = sorted(zip(avg_scores, triple), key=lambda x: x[0], reverse=True)
-            triple = list(zip(*sorted_list))[1]
+            # avg_scores = [my_mean([tri['score'] for tri in path]) for path in triple]
+            # sorted_list = sorted(zip(avg_scores, triple), key=lambda x: x[0], reverse=True)
+            # triple = list(zip(*sorted_list))[1]
             contexts = [[{'e1' : entity[tri['e1']], 
                           'e2' : entity[tri['e2']], 
                           'sent' : sources[tri['sent']],
