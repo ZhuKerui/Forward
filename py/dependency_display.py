@@ -4,4 +4,4 @@ from spacy import displacy, load
 nlp = load('en_core_web_lg')
 
 doc = nlp(sys.argv[1])
-displacy.serve(doc, style='dep')
+displacy.serve(doc, style='dep', options={'compact':True})

@@ -4,16 +4,14 @@
 # python extract_wiki.py collect_dataset
 # python extract_wiki.py collect_score_function_eval_dataset
 # python extract_wiki.py generate_graph
-# python extract_wiki.py generate_single_sent_graph
+# python extract_wiki.py generate_sent_graph [threshold] [significant/explicit/score]
 # python extract_wiki.py collect_one_hop_sample_from_single_sent_graph
 # python extract_wiki.py collect_second_level_sample
 
 from copy import deepcopy
 import re
 import os
-import time
 from collections import Counter
-from queue import SimpleQueue
 import json
 import random
 random.seed(0)
@@ -35,9 +33,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from nltk import word_tokenize
 sys.path.append('..')
 
-from tools.BasicUtils import MyMultiProcessing, my_read, my_write, my_read_pickle, my_write_pickle
-from tools.TextProcessing import (remove_brackets, find_root_in_span, spacy, 
-                                  nlp, find_span, sent_lemmatize, find_dependency_path_from_tree,
+from tools.BasicUtils import MyMultiProcessing, my_write, my_read_pickle, my_write_pickle
+from tools.TextProcessing import (remove_brackets, find_root_in_span, 
+                                  nlp, find_span, sent_lemmatize, 
                                   build_word_tree_v2)
 from tools.DocProcessing import CoOccurrence
 
@@ -116,7 +114,7 @@ max_sentence_length = 50
 min_sentence_length = 5
 
 # Some task specific classes
-
+np.array()
 
 # Some helper functions
 def collect_wiki_entity(file:str):
@@ -124,6 +122,15 @@ def collect_wiki_entity(file:str):
 
 
 def gen_kw_from_wiki_ent(wiki_ent:str, lower:bool=True):
+    '''
+    Generate entity name from the Wikipedia page title.
+    Content in the bracket or after the first comma will be removed.
+    ## Parameters
+        wiki_ent: str
+            The wikipedia page title or entity in the hyperlink
+        lower: bool
+            Whether the returned entity name should be lower-cased, default True
+    '''
     if lower:
         wiki_ent = wiki_ent.lower()
     bracket_removed = remove_brackets(wiki_ent).strip()
@@ -134,6 +141,18 @@ def gen_kw_from_wiki_ent(wiki_ent:str, lower:bool=True):
 
 
 def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_title_file:str):
+    '''
+    Collect sentences and entities from wikipedia dump file.
+    ## Parameters
+        wiki_file: str
+            The file name of the wikipedia dump file
+        save_sent_file: str
+            The file where the collected sentences will be saved
+        save_cooccur_file: str
+            The file where the entity cooccurrence for each sentence will be saved
+        save_title_file: str
+            The file where the title for each sentence will be saved
+    '''
     sents = []
     cooccurs = []
     page_titles = []
@@ -486,43 +505,63 @@ def find_all_triangles(graph:nx.Graph):
     return set(frozenset([n,nbr,nbr2]) for n in tqdm.tqdm(graph) for nbr, nbr2 in itertools.combinations(graph[n],2) if nbr in graph[nbr2])
 
 
-def generate_sample(graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, min_path_num:int=5):
-    target = graph.get_edge_data(ent1, ent2)
+def generate_sample(target_graph:nx.Graph, source_graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, min_path_num:int=5, feature:str='score', replaceable=False):
+    target = target_graph.get_edge_data(ent1, ent2)
     if not target:
         return None
     hop_num = 1
     triples = []
-    target_note = target['note']
+    target_note = target['data'][0]['note']
+    paths = []
     while hop_num<=max_hop_num:
-        paths = find_path_between_pair(graph, ent1, ent2, hop_num=hop_num)
-        paths = [{'path' : path} for path in paths]
-        for item in paths:
-            path = item['path']
+        temp_paths = find_path_between_pair(source_graph, ent1, ent2, hop_num=hop_num)
+        path_candidates = []
+        for path in temp_paths:
             temp_sum = 0
-            for i in range(len(path)-1):
-                temp_sum += 1 / graph.get_edge_data(path[i], path[i+1])['score']
-            item['score'] = (len(path)-1) / temp_sum
-        paths.sort(key=lambda x: x['score'], reverse=True)
-        for item in paths:
-            path = item['path']
-            bad_path = False
+            path_abandon = False
             temp_path = []
             for i in range(len(path)-1):
-                tri = {'e1' : path[i], 'e2' : path[i+1], 'pid' : len(triples)}
-                tri.update(graph.get_edge_data(path[i], path[i+1]))
-                temp_path.append(tri)
-                if tri['note'] == target_note:
-                    bad_path = True
-                    break
-            if not bad_path:
-                triples.append(temp_path)
-            if len(triples) >= min_path_num:
-                break
-        if len(triples) >= min_path_num:
-            break
+                data = source_graph.get_edge_data(path[i], path[i+1])
+                sim = data['sim']
+                data = data['data']
+                item:dict = deepcopy(data[0])
+                if item['note'] == target_note:
+                    if not replaceable or len(data) <= 1:
+                        path_abandon = True
+                        break
+                    else:
+                        item = deepcopy(data[1])
+                item.update({'e1' : path[i], 'e2' : path[i+1], 'sim' : sim})
+                temp_path.append(item)
+                if feature:
+                    temp_sum += 1 / item[feature]
+            if path_abandon:
+                continue
+            if feature:
+                path_candidates.append({'score' : (len(path)-1) / temp_sum, 'path' : temp_path})
+            else:
+                path_candidates.append(temp_path)
+        
+        if path_candidates:
+            if feature:
+                path_candidates.sort(key=lambda x: x['score'], reverse=True)
+                path_candidates = [item['path'] for item in path_candidates]
+            paths.extend(path_candidates)
+            
         hop_num += 1
-    if len(triples) < min_path_num:
+        
+    if len(paths) < min_path_num:
         return None
+    
+    if not feature:
+        random.seed(0)
+        random.shuffle(paths)
+        
+    for path in paths[:min_path_num]:
+        for tri in path:
+            tri.update({'pid' : len(triples)})
+        triples.append(path)
+        
     entity = set()
     source = set()
     for path in triples:
@@ -544,48 +583,47 @@ def generate_sample(graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, min_p
             'source' : source, 
             'triple' : triples}
 
-
-def generate_second_level_sample(sample:dict):
-    second_level_sample = {}
-    second_level_sample['key pair'] = sample['pair']
-    second_level_sample['target'] = sample['target']
-    second_level_sample['sources'] = []
-    sources = [nlp(sent) for sent in sample['source']]
-    for t in sample['triple']:
-        ent1_idx, ent2_idx, sent_idx, kw1_span, kw2_span = t
-        kw1_span, kw2_span = eval(kw1_span), eval(kw2_span)
-        if kw1_span[0] > kw2_span[0]:
-            kw1_span, kw2_span = kw2_span, kw1_span
-        doc = sources[sent_idx]
-        i = 0
-        m = {}
-        i2s = {}
-        kw1_i, kw2_i = 0, 0
-        for j in range(len(doc)):
-            m[j] = i
-            if j == kw1_span[0]:
-                kw1_i = i
-                i2s[i] = doc[kw1_span[0]:kw1_span[1]+1].text
-            elif j == kw2_span[0]:
-                kw2_i = i
-                i2s[i] = doc[kw2_span[0]:kw2_span[1]+1].text
-            elif i not in i2s:
-                i2s[i] = doc[j].text
-            if (j < kw1_span[0] or j >= kw1_span[1]) and (j < kw2_span[0] or j >= kw2_span[1]):
-                i += 1
-        g = []
-        tokenized_sent = [[] for _ in range(i)]
-        for tok in doc:
-            head_idx = m[tok.i]
-            tokenized_sent[head_idx].append(tok.text)
-            for child in tok.children:
-                tail_idx = m[child.i]
-                if head_idx != tail_idx:
-                    g.extend([(head_idx, tail_idx, child.dep_), (tail_idx, head_idx, 'i_'+child.dep_)])
-        tokenized_sent = [' '.join(p) for p in tokenized_sent]
-        one_sentence_graph = {'pair' : (kw1_i, kw2_i), 'sent' : tokenized_sent, 'graph' : g}
-        second_level_sample['sources'].append(one_sentence_graph)
-    return second_level_sample
+# def generate_second_level_sample(sample:dict):
+#     second_level_sample = {}
+#     second_level_sample['key pair'] = sample['pair']
+#     second_level_sample['target'] = sample['target']
+#     second_level_sample['sources'] = []
+#     sources = [nlp(sent) for sent in sample['source']]
+#     for t in sample['triple']:
+#         ent1_idx, ent2_idx, sent_idx, kw1_span, kw2_span = t
+#         kw1_span, kw2_span = eval(kw1_span), eval(kw2_span)
+#         if kw1_span[0] > kw2_span[0]:
+#             kw1_span, kw2_span = kw2_span, kw1_span
+#         doc = sources[sent_idx]
+#         i = 0
+#         m = {}
+#         i2s = {}
+#         kw1_i, kw2_i = 0, 0
+#         for j in range(len(doc)):
+#             m[j] = i
+#             if j == kw1_span[0]:
+#                 kw1_i = i
+#                 i2s[i] = doc[kw1_span[0]:kw1_span[1]+1].text
+#             elif j == kw2_span[0]:
+#                 kw2_i = i
+#                 i2s[i] = doc[kw2_span[0]:kw2_span[1]+1].text
+#             elif i not in i2s:
+#                 i2s[i] = doc[j].text
+#             if (j < kw1_span[0] or j >= kw1_span[1]) and (j < kw2_span[0] or j >= kw2_span[1]):
+#                 i += 1
+#         g = []
+#         tokenized_sent = [[] for _ in range(i)]
+#         for tok in doc:
+#             head_idx = m[tok.i]
+#             tokenized_sent[head_idx].append(tok.text)
+#             for child in tok.children:
+#                 tail_idx = m[child.i]
+#                 if head_idx != tail_idx:
+#                     g.extend([(head_idx, tail_idx, child.dep_), (tail_idx, head_idx, 'i_'+child.dep_)])
+#         tokenized_sent = [' '.join(p) for p in tokenized_sent]
+#         one_sentence_graph = {'pair' : (kw1_i, kw2_i), 'sent' : tokenized_sent, 'graph' : g}
+#         second_level_sample['sources'].append(one_sentence_graph)
+#     return second_level_sample
 
 
 def sample_to_neo4j(sample:dict):
@@ -727,20 +765,45 @@ def informativeness_demo(sent:str, kw1:str, kw2:str, fp:FeatureProcess):
     return pd.DataFrame({i:[doc[i].text, np.round(path[i], 3)] for i in range(len(doc))})
 
 
-def generate_single_sent_graph(graph:nx.Graph, score_threshold:float):
-        single_sent_g = nx.Graph()
-        for edge in tqdm.tqdm(graph.edges):
-            data = graph.get_edge_data(*edge)
-            sim = data['sim']
-            data = data['data']
-            best_score, best_note, best_span, best_dep_coverage, best_pattern_freq = data[0]
-            for score, note, span, dep_coverage, pattern_freq in data:
-                if score > best_score:
-                    best_score, best_note, best_span, best_dep_coverage, best_pattern_freq = score, note, span, dep_coverage, pattern_freq
-            if best_score >= score_threshold:
-                single_sent_g.add_edge(*edge, score=best_score, note=best_note, sim=sim, span=best_span, significant=best_dep_coverage, explict=best_pattern_freq)
-        return single_sent_g
-        
+def generate_sent_graph_from_graph(pairs:list, graph:nx.Graph, score_threshold:float, feature:str='score'):
+    sent_graph = nx.Graph()
+    for pair in tqdm.tqdm(pairs):
+        data = graph.get_edge_data(*pair)
+        sim = data['sim']
+        data = data['data']
+        new_data = []
+        for score, note, span, dep_coverage, pattern_freq in data:
+            if feature == 'explicit':
+                feature_score = pattern_freq
+            elif feature == 'significant':
+                feature_score = dep_coverage
+            else:
+                feature_score = score
+            if feature_score >= score_threshold:
+                new_data.append((feature_score, {'score':score, 'note':note, 'span':span, 'significant':dep_coverage, 'explicit':pattern_freq}))
+        if not new_data:
+            continue
+        new_data.sort(key=lambda x: x[0], reverse=True)
+        new_data = list(zip(*new_data))[1]
+        sent_graph.add_edge(*pair, sim=sim, data=new_data)
+    return sent_graph
+    
+    
+def generate_sent_graph_from_cooccur(pairs:list, cooccur:dict):
+    sent_graph = nx.Graph()
+    for ent1, ent2 in tqdm.tqdm(pairs):
+        sent_candidates = list(cooccur[ent1] & cooccur[ent2])
+        if len(sent_candidates) > 2:
+            sents = sent_candidates[:2]
+        else:
+            sents = sent_candidates
+        if not sents:
+            continue
+        new_data = [{'score':0, 'note':note, 'span':0, 'significant':0, 'explicit':0} for note in sents]
+        sent_graph.add_edge(ent1, ent2, sim=0, data=new_data)
+    return sent_graph
+    
+
         
 if __name__ == '__main__':
     # Generate the save dir
@@ -968,12 +1031,28 @@ if __name__ == '__main__':
         my_write_pickle(graph_file, graph)
         
     
-    elif sys.argv[1] == 'generate_single_sent_graph':
+    elif sys.argv[1] == 'generate_sent_graph':
         
         # Load keyword occur dict which has occurance record for all keywords in selected sentences
         graph = my_read_pickle(graph_file)
-        single_sent_g = generate_single_sent_graph(graph, 0.6)
-        my_write_pickle(single_sent_graph_file, single_sent_g)
+        threshold = 0.6
+        feature = 'score'
+        if len(sys.argv) == 4:
+            threshold = float(sys.argv[2])
+            feature = sys.argv[3]
+        single_sent_g = generate_sent_graph_from_graph(list(graph.edges), graph, threshold, feature)
+        if len(sys.argv) == 4:
+            my_write_pickle('sentence_graph_%s_%.2f.pickle' % (feature, threshold), single_sent_g)
+        else:
+            my_write_pickle(single_sent_graph_file, single_sent_g)
+            
+            
+    elif sys.argv[1] == 'generate_random_sent_graph':
+        
+        d = my_read_pickle(entity_occur_from_cooccur_file)
+        target_graph:nx.Graph = my_read_pickle(single_sent_graph_file)
+        random_sent_g = generate_sent_graph_from_cooccur(list(target_graph.edges), d)
+        my_write_pickle('sentence_graph_random.pickle', random_sent_g)
             
         
     elif sys.argv[1] == 'collect_score_function_eval_dataset':
@@ -1016,9 +1095,10 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'collect_sample_from_single_sent_graph':
         
         context_sent_score_threshold = 0.6
-        target_edges = list(my_read_pickle(single_sent_graph_file).edges)
+        target_graph:nx.Graph = my_read_pickle(single_sent_graph_file)
+        target_edges = list(target_graph.edges)
         source_sent_g = my_read_pickle(graph_file)
-        source_sent_g:nx.Graph = generate_single_sent_graph(source_sent_g, context_sent_score_threshold)
+        source_sent_g = generate_sent_graph_from_graph(list(source_sent_g.edges), source_sent_g, context_sent_score_threshold)
         
         sample_num = -1
         samples = []
@@ -1026,27 +1106,108 @@ if __name__ == '__main__':
         edge_count = 0
         for edge_idx, edge in enumerate(tqdm.tqdm(target_edges)):
             edge_count += 1
-            sample = generate_sample(source_sent_g, edge[0], edge[1])
+            sample = generate_sample(target_graph, source_sent_g, edge[0], edge[1])
             if sample:
                 samples.append(sample)
             if (sample_num > 0) and (len(samples) >= sample_num):
                 break
         print(len(samples) * 1.0 / edge_count)
     
-        with open('dataset_level_1.json', 'w') as f_out:
+        with open('dataset_level_temp.json', 'w') as f_out:
+            json.dump(samples, f_out)
+            print(len(samples))
+            
+            
+    elif sys.argv[1] == 'collect_sample_with_random_sentence':
+        
+        
+        d = my_read_pickle(entity_occur_from_cooccur_file)
+        dataset_splits = ['train', 'dev', 'test']
+        # pair2sent = {}
+        
+        context_sent_score_threshold = 0.6
+        target_graph:nx.Graph = my_read_pickle(single_sent_graph_file)
+        source_sent_g = generate_sent_graph_from_cooccur(list(target_graph.edges), d)
+        
+        for dataset_split in dataset_splits:
+            original_file = 'MyFiD/data/' + dataset_split + '.json'
+            with open(original_file) as f_in:
+                samples = json.load(f_in)
+                print(original_file)
+                new_samples = []
+                for sample in tqdm.tqdm(samples):
+                    # entity = sample['entity']
+                    # sent_list = []
+                    # for path in sample['triple']:
+                    #     for tri in path:
+                    #         ent1, ent2 = entity[tri['e1']], entity[tri['e2']]
+                    #         pair = frozenset((ent1, ent2))
+                    #         sents = pair2sent.get(pair)
+                    #         if not sents:
+                    #             sent_candidates = list(d[ent1] & d[ent2])
+                    #             if len(sent_candidates) > 2:
+                    #                 sents = sent_candidates[:2]
+                    #             else:
+                    #                 sents = sent_candidates
+                    #             sents = [note2line(sent).strip() for sent in sents]
+                    #             pair2sent[pair] = sents
+                    #         sent = sents[0] if sents[0] != sample['target'] or len(sents) == 1 else sents[1]
+                    #         if sent not in sent_list:
+                    #             sent_list.append(sent)
+                    #         tri['sent'] = sent_list.index(sent)
+                    # sample['source'] = sent_list
+                    new_samples.append(generate_sample(target_graph, source_sent_g, sample['pair'][0], sample['pair'][1], feature=None, replaceable=True))
+                with open('random_' + dataset_split + '.json', 'w') as f_out:
+                    json.dump(new_samples, f_out)
+                            
+                    
+    elif sys.argv[1] == 'collect_sample_from_dataset':
+        
+        feature = sys.argv[2]
+        dataset_file = sys.argv[3]
+        with open(dataset_file) as f_in:
+            samples = json.load(f_in)
+        target_edges = [sample['pair'] for sample in samples]
+        target_graph:nx.Graph = my_read_pickle(single_sent_graph_file)
+        source_sent_g = my_read_pickle(graph_file)
+        source_sent_g:nx.Graph = generate_single_sent_graph(source_sent_g, 0.4, feature)
+        
+        sample_num = -1
+        samples = []
+        print(len(target_edges))
+        edge_count = 0
+        fail_num = 0
+        for edge_idx, edge in enumerate(tqdm.tqdm(target_edges)):
+            edge_count += 1
+            sample = generate_sample(target_graph, source_sent_g, edge[0], edge[1], min_path_num=1, feature=feature)
+            if sample:
+                samples.append(sample)
+            else:
+                sample = generate_sample(target_graph, target_graph, edge[0], edge[1], min_path_num=1)
+                if sample:
+                    fail_num += 1
+                    samples.append(sample)
+                else:
+                    print(edge)
+            if (sample_num > 0) and (len(samples) >= sample_num):
+                break
+        print(len(samples) * 1.0 / edge_count)
+        print('fail on', fail_num)
+    
+        with open('dataset_' + feature + '.json', 'w') as f_out:
             json.dump(samples, f_out)
             print(len(samples))
             
     
-    elif sys.argv[1] == 'collect_second_level_sample':
+    # elif sys.argv[1] == 'collect_second_level_sample':
         
-        with open('dataset_level_1.json') as f_in:
-            samples = json.load(f_in)
+    #     with open('dataset_level_1.json') as f_in:
+    #         samples = json.load(f_in)
         
-        second_level_samples = [generate_second_level_sample(sample) for sample in tqdm.tqdm(samples)]
-        with open('dataset_level_2.json', 'w') as f_out:
-            json.dump(second_level_samples, f_out)
-            print(len(second_level_samples))
+    #     second_level_samples = [generate_second_level_sample(sample) for sample in tqdm.tqdm(samples)]
+    #     with open('dataset_level_2.json', 'w') as f_out:
+    #         json.dump(second_level_samples, f_out)
+    #         print(len(second_level_samples))
         
     elif sys.argv[1] == 'collect_triangles_from_graph':
         

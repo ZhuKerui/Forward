@@ -12,5 +12,6 @@ java -Xmx2G -jar /scratch/jeffhj/research/relation_modeling/meteor/meteor-*.jar 
 echo
 
 echo BERTSCORE
+CUDA_VISIBLE_DEVICES=2
 bert-score -r $2 -c $1 --lang en --model roberta-large-mnli
 echo
