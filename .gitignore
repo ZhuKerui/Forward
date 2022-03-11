@@ -15,7 +15,12 @@ play_ground/**
 openie/
 
 MyFiD/checkpoint
+MyFiD/log
 dataset_level_1.json
+dataset_explicit.json
+dataset_significant.json
+*.json
+*.pickle
 GraphWriter
 test.tsv
 tools/layers.py

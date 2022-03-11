@@ -114,7 +114,6 @@ max_sentence_length = 50
 min_sentence_length = 5
 
 # Some task specific classes
-np.array()
 
 # Some helper functions
 def collect_wiki_entity(file:str):
