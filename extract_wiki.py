@@ -163,21 +163,28 @@ def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_
         for line in f_in:
             line = line.strip()
             if not line or line == page_name or line == '</doc>':
+                # Skip empty lines
                 continue
             if re.match(r'^(<doc id=")', line):
+                # This is the title line of a page, which is the first line of this page
+                
+                # Extract page title, extract entity name, insert
                 page_name = ' '.join(line[re.search(r'title="', line).end():re.search(r'">', line).start()].split())
                 page_kw = gen_kw_from_wiki_ent(page_name, True)
                 wordtree, token2idx = build_word_tree_v2([page_kw])
                 kw2ent_map = {page_kw : page_name}
             else:
-                kw2ent_map[page_kw] = page_name
-                links = re.findall(r'<a href="[^"]*">[^<]*</a>', line)
+                # This is a paragraph in the page
+
+                kw2ent_map[page_kw] = page_name                         # Reload the entity for page title
+                links = re.findall(r'<a href="[^"]*">[^<]*</a>', line)  # Extract all the links in this paragraph
                 new_kws = []
                 for l in links:
                     breakpoint = l.index('">')
-                    entity_name = ' '.join(unquote(l[9:breakpoint]).split())
-                    kw = gen_kw_from_wiki_ent(entity_name, False)
+                    entity_name = ' '.join(unquote(l[9:breakpoint]).split())    # Extract entity from the link
+                    kw = gen_kw_from_wiki_ent(entity_name, False)               # Generate entity name for the entity, keep the original case
                     kw_lower = kw.lower()
+                    # Update the mention-entity dict and the new entity list with lower-cased entity name
                     if kw == '':
                         print(wiki_file, line, entity_name)
                     else:
@@ -186,21 +193,21 @@ def get_sentence(wiki_file:str, save_sent_file:str, save_cooccur_file:str, save_
                     # Replace link with plain text
                     kw_in_text:str = l[breakpoint+2:-4]
                     kw_in_text_lower = kw_in_text.lower()
-                    if kw_lower[-len(kw_in_text):] == kw_in_text_lower:
-                        if kw_in_text.islower():
-                            line = line.replace(l, kw_lower)
+                    if kw_lower[-len(kw_in_text):] == kw_in_text_lower:         # Sometimes the entity name in the link is only part of the 
+                        if kw_in_text.islower():                                # entity name we generate from the entity. We replace the 
+                            line = line.replace(l, kw_lower)                    # original entity name with the name we create in some cases.
                         else:
                             line = line.replace(l, kw)
                     else:
                         line = line.replace(l, kw_in_text)
-                paragraph = sent_tokenize(line)
-                wordtree, token2idx = build_word_tree_v2(new_kws, old_MyTree=wordtree, old_token2idx=token2idx)
+                paragraph = sent_tokenize(line)                                 # Split the paragraph into sentences
+                wordtree, token2idx = build_word_tree_v2(new_kws, old_MyTree=wordtree, old_token2idx=token2idx) # Update the word tree with the new entity names from this paragraph
                 co = CoOccurrence(wordtree, token2idx)
                 for sent in paragraph:
-                    sent = remove_brackets(sent)
-                    reformed_sent = word_tokenize(sent)
-                    reformed_sent = sent_lemmatize(sent)
-                    reformed_sent = [text.lower() for text in reformed_sent]
+                    sent = remove_brackets(sent)                                # Remove the content wrapped in brackets
+                    reformed_sent = word_tokenize(sent)                         # Tokenize the sentence
+                    reformed_sent = sent_lemmatize(sent)                        # Lemmatize the sentence
+                    reformed_sent = [text.lower() for text in reformed_sent]    # Lower-case the sentence for finding entity name occurrence
                     kws = co.line_operation(reformed_sent)
                     sents.append(sent)
                     cooccurs.append('\t'.join([kw2ent_map[kw] for kw in kws]))
@@ -223,12 +230,18 @@ def note2line(note:str, posfix='.dat'):
 
 # Feature collection, contains subject/object full span and keyword-entity recall
 def get_back(doc, idx):
+    '''
+    Get the index of the last token of an entity name in the SpaCy document
+    '''
     while doc[idx].dep_ == 'compound':
         idx = doc[idx].head.i
     return idx
 
 
 def get_ahead(doc, idx):
+    '''
+    Get the index of the first token of an entity name in the SpaCy document
+    '''
     mod_exist = True
     while mod_exist:
         c_list = [c for c in doc[idx].children]
@@ -246,6 +259,9 @@ def get_ahead(doc, idx):
 feature_columns=[sim_str, kw1_str, kw1_span_str, kw1_ent_str, kw2_str, kw2_span_str, kw2_ent_str, sent_str, dep_path_str, pattern_str, dep_coverage_str]
 
 def get_phrase_full_span(doc, phrase_span):
+    '''
+    Get the complete span of a phrase in the SpaCy document
+    '''
     phrase_right_most = get_back(doc, phrase_span[-1].i)
     phrase_left_most = min(get_ahead(doc, phrase_right_most), get_ahead(doc, phrase_span[0].i), phrase_span[0].i)
     return (phrase_left_most, phrase_right_most)
@@ -257,102 +273,79 @@ def generate_clean_phrase(phrase:str):
     return ' '.join(re.sub(r'[^a-z0-9\s]', '', phrase).split())
 
 
-def sentence_decompose(doc, kw1:str, kw2:str):
-    kw1_spans = find_span(doc, kw1, True, True)
-    kw2_spans = find_span(doc, kw2, True, True)
-    data = []
-    for kw1_span in kw1_spans:
-        for kw2_span in kw2_spans:
-            kw1_left_most, kw1_right_most = get_phrase_full_span(doc, kw1_span)
-            kw2_left_most, kw2_right_most = get_phrase_full_span(doc, kw2_span)
-            if kw1_left_most != kw1_span[0].i or kw1_right_most != kw1_span[-1].i or kw2_left_most != kw2_span[0].i or kw2_right_most != kw2_span[-1].i:
-                # full span and keyword span don't match
-                continue
-            kw1_steps, kw2_steps, branch = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
-            if not branch.any():
-                continue
-            path = get_path(doc, kw1_steps, kw2_steps)
-            pattern = gen_pattern(path)
-            if not pattern.startswith('i_nsubj'):
-                continue
-            data.append((kw1_span, kw2_span, branch, path, pattern))
-    return data
+def find_dependency_info_from_tree(doc, kw1, kw2):
+    '''
+    Find the dependency path that connect two entity names in the SpaCy document
 
-
-class FeatureProcess:
-    def __init__(self, sub_path_pattern_file:str):
-        c, log_max_cnt = load_pattern_freq(sub_path_pattern_file)
-        self.c = c
-        self.log_max_cnt = log_max_cnt
+    ## Return
+        The steps from entity one to entity two or to the sub-root node
+        The steps from entity two to entity two or to the sub-root node
+        The corepath connecting the two entities
+    '''
+    # Find roots of the spans
+    idx1 = find_root_in_span(kw1)
+    idx2 = find_root_in_span(kw2)
+    kw1_front, kw1_end = kw1[0].i, kw1[-1].i
+    kw2_front, kw2_end = kw2[0].i, kw2[-1].i
+    branch = np.zeros(len(doc))
+    kw1_steps = []
+    kw2_steps = []
+    path_found = False
+    
+    # Start from entity one
+    i = idx1
+    while branch[i] == 0:
+        branch[i] = 1
+        kw1_steps.append(i)
+        i = doc[i].head.i
+        if i >= kw2_front and i <= kw2_end:
+            # entity two is the parent of entity one
+            path_found = True
+            break
         
-    
-    def expand_dependency_info_from_tree(self, doc, path:np.ndarray):
-        dep_path:list = (np.arange(*path.shape)[path!=0]).tolist()
-        for element in dep_path:
-            if doc[element].dep_ == 'conj':
-                path[doc[element].head.i] = 0
-        paths = collect_sub_dependency_path(doc, path)
-        paths = [item for item in paths if item[1].split()[0] in modifier_dependencies]
-        for p in paths:
-            pattern = gen_sub_dep_path_pattern(p[1])
-            if pattern == '':
-                path[p[2]] = path[p[0]]
-            else:
-                path[p[2]] = cal_freq_from_path(pattern, self.c, self.log_max_cnt)
+    if not path_found:
+        # If entity two is not the parent of entity one, we start from entity two
+        i = idx2
+        while branch[i] != 1:
+            branch[i] = 2
+            kw2_steps.append(i)
+            if i == doc[i].head.i:
+                # If we reach the root of the tree, which hasn't been visited by the path from entity one, 
+                # it means entity one and two are not in the same tree, no path is found
+                return [], [], np.array([])
             
-    def feature_process(self, doc, kw1:str, kw2:str)->List[dict]:
-        data = []
-        punct_mask = np.array([token.dep_ != 'punct' for token in doc])
-        for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
-            self.expand_dependency_info_from_tree(doc, branch)
-            data.append({kw1_span_str : (kw1_span[0].i, kw1_span[-1].i),
-                         kw2_span_str : (kw2_span[0].i, kw2_span[-1].i),
-                         pattern_str : pattern, 
-                         dep_path_str : path, 
-                         dep_coverage_str : branch[punct_mask].mean()
-                        })
-        return data
+            i = doc[i].head.i
+            if i >= kw1_front and i <= kw1_end:
+                # entity one is the parent of entity two
+                branch[branch != 2] = 0
+                kw1_steps = []
+                path_found = True
+                break
     
-    def batched_feature_process(self, sent:str, pairs):
-        data = []
-        doc = nlp(sent)
-        if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
-            return []
-        for item in pairs:
-            # Calculate calculate dependency coverage
-            temp_data = self.feature_process(doc, item[kw1_str], item[kw2_str])
-            for d in temp_data:
-                d.update(item)
-            data.extend(temp_data)
-        return data
+    if not path_found:
+        # entity one and entity two are on two sides, i is their joint
+        break_point = kw1_steps.index(i)
+        branch[kw1_steps[break_point+1 : ]] = 0
+        kw1_steps = kw1_steps[:break_point] # Note that we remain the joint node in the branch, but we don't include joint point in kw1_steps and kw2_steps
+                                            # this is because the joint node is part of the path and we need the modification information from it, 
+                                            # but we don't care about its dependency
+    branch[branch != 0] = 1             # Unify the branch to contain only 0s and 1s
+    branch[kw1_front : kw1_end+1] = 1   # Mark the entity one as part of the branch
+    branch[kw2_front : kw2_end+1] = 1   # Mark the entity two as part of the branch
+    return kw1_steps, kw2_steps, branch
 
 
-def gen_sub_dep_path_pattern(path:str):
-    return ' '.join(path.replace('compound', '').replace('conj', '').replace('appos', '').split())
-
-def collect_sub_dep_path(doc, kw1:str, kw2:str)->List[dict]:
-    data = []
-    for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
-        ans = [str(item[1]) for item in collect_sub_dependency_path(doc, branch)]
-        ans = [gen_sub_dep_path_pattern(item) for item in ans if 'punct' not in item]
-        ans = [item for item in ans if item]
-        data.extend(ans)
-    return data
-
-
-def batched_collect_sub_dep_path(sent, pairs):
-    data = []
-    pairs = [item for item in pairs if item[sim_str] >= similar_threshold]
-    if not pairs:
-        return []
-    doc = nlp(sent)
-    if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
-        return []
-    for item in pairs:
-        # Calculate calculate dependency coverage
-        temp_data = collect_sub_dep_path(doc, item[kw1_str], item[kw2_str])
-        data.extend(temp_data)
-    return data
+def get_path(doc, kw1_steps:List[int], kw2_steps:List[int]):
+    '''
+    Collect the corepath in str
+    '''
+    path_tokens = []
+    for step in kw1_steps:
+        path_tokens.append('i_' + doc[step].dep_)
+    kw2_steps.reverse()
+    for step in kw2_steps:
+        path_tokens.append(doc[step].dep_)
+    return ' '.join(path_tokens)
 
 
 def reverse_path(path:str):
@@ -361,7 +354,7 @@ def reverse_path(path:str):
     return r_path
 
 
-def gen_pattern(path:str):
+def gen_corepath_pattern(path:str):
     if 'i_nsubj' not in path:
         path = reverse_path(path)
     path = path.split()
@@ -377,13 +370,216 @@ def gen_pattern(path:str):
     return ' '.join(path_)
 
 
-def process_line(sent:str, tups:List[Tuple[float, str, str]], sent_note:str, processor):
+def gen_subpath_pattern(path:str):
+    return ' '.join(path.replace('compound', '').replace('conj', '').replace('appos', '').split())
+
+
+def sentence_decompose(doc, kw1:str, kw2:str):
+    '''
+    Analyze the sentence with two entity names
+
+    ## Return
+    List of tuples. The returned tuples satisfy that:
+        1. There exists a corepath starting with 'i_nsubj"
+        2. The entity names are the complete span itself
+    Each tuple contains the following fields: 
+        span of entity one
+        span of entity two
+        a numpy array indicate the corepath
+        the corepath in str
+        the pattern generated from corepath
+    '''
+    kw1_spans = find_span(doc, kw1, True, True)
+    kw2_spans = find_span(doc, kw2, True, True)
+    data = []
+    # A sentence may contain more than one occurrence for each entity name, we process each pair separately
+    for kw1_span in kw1_spans:
+        for kw2_span in kw2_spans:
+            kw1_left_most, kw1_right_most = get_phrase_full_span(doc, kw1_span)
+            kw2_left_most, kw2_right_most = get_phrase_full_span(doc, kw2_span)
+            if kw1_left_most != kw1_span[0].i or kw1_right_most != kw1_span[-1].i or kw2_left_most != kw2_span[0].i or kw2_right_most != kw2_span[-1].i:
+                # full span and keyword span don't match
+                continue
+            kw1_steps, kw2_steps, branch = find_dependency_info_from_tree(doc, kw1_span, kw2_span)
+            if not branch.any():
+                # If the branch is empty, it means no corepath is found
+                continue
+            path = get_path(doc, kw1_steps, kw2_steps)
+            pattern = gen_corepath_pattern(path)
+            if not pattern.startswith('i_nsubj'):
+                # If the corepath does not start with 'i_nsubj', we drop it
+                continue
+            data.append((kw1_span, kw2_span, branch, path, pattern))
+    return data
+
+
+def load_pattern_freq(path_pattern_count_file_:str):
+    c:Counter = my_read_pickle(path_pattern_count_file_)
+    max_cnt = c.most_common(1)[0][1]
+    log_max_cnt = np.log(max_cnt+1)
+    return c, log_max_cnt
+
+
+class CalFreq:
+    def __init__(self, path_freq_file:str):
+        c, log_max_cnt = load_pattern_freq(path_freq_file)
+        self.c:Counter = c
+        self.log_max_cnt:float = log_max_cnt
+
+    def cal_freq_from_path(self, path:str):
+        cnt = self.c.get(path)
+        cnt = (cnt if cnt else 0.5) + 1
+        return np.log(cnt) / self.log_max_cnt
     
+
+def collect_sub_dependency_path(doc, branch:np.ndarray):
+    paths = []
+    dep_path:list = (np.arange(*branch.shape)[branch!=0]).tolist()
+    for token_id in dep_path:
+        temp_paths = [(token_id, child.dep_, child.i) for child in doc[token_id].children if branch[child.i] == 0]
+        while len(temp_paths) > 0:
+            item  = temp_paths.pop()
+            paths.append(item)
+            temp_paths.extend([(item[0], item[1] + ' ' + child.dep_, child.i) for child in doc[item[2]].children if branch[child.i] == 0])
+    return paths
+
+
+class FeatureProcess:
+    '''
+    Class that extracts features for scoring
+    '''
+    def __init__(self, sub_path_pattern_file:str):
+        self.cal_freq = CalFreq(sub_path_pattern_file)
+    
+    def expand_dependency_info_from_tree(self, doc, branch:np.ndarray):
+        dep_path:list = (np.arange(*branch.shape)[branch!=0]).tolist()
+        for element in dep_path:
+            if doc[element].dep_ == 'conj':
+                branch[doc[element].head.i] = 0
+        paths = collect_sub_dependency_path(doc, branch)
+        paths = [item for item in paths if item[1].split()[0] in modifier_dependencies]
+        for p in paths:
+            pattern = gen_subpath_pattern(p[1])
+            if pattern == '':
+                branch[p[2]] = branch[p[0]]
+            else:
+                branch[p[2]] = self.cal_freq.cal_freq_from_path(pattern)
+            
+    def feature_process(self, doc, kw1:str, kw2:str)->List[dict]:
+        data = []
+        punct_mask = np.array([token.dep_ != 'punct' for token in doc])
+        for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
+            self.expand_dependency_info_from_tree(doc, branch)
+            data.append({kw1_span_str : (kw1_span[0].i, kw1_span[-1].i),
+                         kw2_span_str : (kw2_span[0].i, kw2_span[-1].i),
+                         pattern_str : pattern, 
+                         dep_path_str : path, 
+                         dep_coverage_str : branch[punct_mask].mean()
+                        })
+        return data
+    
+    def batched_feature_process(self, sent:str, pairs):
+        '''
+        Process one sentence which may contain several pairs of entities
+
+        ## Parameters
+            sent: str
+                The sentence to be processed
+            pairs: List of dict
+                Information about the pairs. Each pair item should contain:
+                    1. 'kw1' : entity name
+                    2. 'kw2' : entity name
+        
+        ## Return:
+            List of dict. The list will be empty if the length of the sentence is out of bound or no valid pair is found.
+            Each item contains:
+                Information about the valid entity pair. Each item contains:
+                    1. 'kw1' : entity name
+                    2. 'kw2' : entity name
+                    3. 'kw1_span' : span for entity one
+                    4. 'kw2_span' : span for entity two
+                    5. 'pattern' : corepath pattern
+                    6. 'path' : corepath
+                    7. 'dep_coverage' : significance score
+        '''
+        data = []
+        doc = nlp(sent)
+        if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
+            return []
+        for item in pairs:
+            # Calculate calculate dependency coverage
+            temp_data = self.feature_process(doc, item[kw1_str], item[kw2_str])
+            for d in temp_data:
+                d.update(item)
+            data.extend(temp_data)
+        return data
+
+
+def collect_subpath_pattern(doc, kw1:str, kw2:str)->List[str]:
+    '''
+    Collect subpath pattern between two entities from a SpaCy document
+
+    ## Return
+        List of subpath patterns collected from this document between the two entities
+    '''
+    data = []
+    for kw1_span, kw2_span, branch, path, pattern in sentence_decompose(doc, kw1, kw2):
+        ans = [str(item[1]) for item in collect_sub_dependency_path(doc, branch)]
+        ans = [gen_subpath_pattern(item) for item in ans if 'punct' not in item]
+        ans = [item for item in ans if item]
+        data.extend(ans)
+    return data
+
+
+def batched_collect_subpath_pattern(sent, pairs) -> List[str]:
+    '''
+    Collect subpath patterns from one sentence which may contain several pairs of entities
+
+    ## Parameters
+        sent: str
+            The sentence to be processed
+        pairs: List of dict
+            Information about the pairs. Each pair item should contain:
+                1. 'kw1' : entity name
+                2. 'kw2' : entity name
+    
+    ## Return:
+        List of subpath patterns. The list will be empty if the length of the sentence is out of bound or no valid pair is found.
+    '''
+    data = []
+    pairs = [item for item in pairs if item[sim_str] >= similar_threshold]
+    if not pairs:
+        return []
+    doc = nlp(sent)
+    if len(doc) > max_sentence_length or len(doc) < min_sentence_length:
+        return []
+    for item in pairs:
+        # Calculate calculate dependency coverage
+        temp_data = collect_subpath_pattern(doc, item[kw1_str], item[kw2_str])
+        data.extend(temp_data)
+    return data
+
+
+def process_line(sent:str, tups:List[Tuple[float, str, str]], sent_note:str, processor):
+    '''
+    Process a sentence with a given processor function.
+    '''
     pairs = [{kw1_str:gen_kw_from_wiki_ent(tup[1], False), kw2_str:gen_kw_from_wiki_ent(tup[2], False), sim_str:tup[0], sent_str:sent_note, kw1_ent_str:tup[1], kw2_ent_str:tup[2]} for tup in tups]
     return processor(sent, pairs)
     
     
 def process_list(sents:List[str], pairs_list:List[str], processor):
+    '''
+    Process a list of sentences with a given processor function.
+
+    ## Parameters
+        sents: list of str
+            A list of sentences
+        pairs_list: list of str
+            Each str is a line in pair file
+        processor: function
+            A function to process the sentence
+    '''
     data = []
     for line_idx, pairs in enumerate(tqdm.tqdm(pairs_list)):
         if not pairs:
@@ -395,7 +591,9 @@ def process_list(sents:List[str], pairs_list:List[str], processor):
 
 
 def process_file(save_sent_file:str, save_pair_file:str, processor, posfix:str='.dat'):
-    # Build test data
+    '''
+    Process a file with a given processor function.
+    '''
     with open(save_sent_file) as f_in:
         sents = f_in.read().split('\n')
     with open(save_pair_file) as f_in:
@@ -414,25 +612,12 @@ def process_file(save_sent_file:str, save_pair_file:str, processor, posfix:str='
 record_columns = feature_columns + [pattern_freq_str, score_str]
 
 
-def filter_unrelated_from_df(df:pd.DataFrame, similar_threshold):
+def filter_unrelated_from_df(df:pd.DataFrame, similar_threshold:float):
     return df[df[sim_str] >= similar_threshold]
 
 
-def cal_freq_from_path(path:str, c:Counter, log_max_cnt:float):
-    cnt = c.get(path)
-    cnt = (cnt if cnt else 0.5) + 1
-    return np.log(cnt) / log_max_cnt
-
-
-def load_pattern_freq(path_pattern_count_file_:str):
-    c:Counter = my_read_pickle(path_pattern_count_file_)
-    max_cnt = c.most_common(1)[0][1]
-    log_max_cnt = np.log(max_cnt+1)
-    return c, log_max_cnt
-
-
-def cal_freq_from_df(df:pd.DataFrame, c:Counter, log_max_cnt:float):
-    return df.assign(pattern_freq = df.apply(lambda x: cal_freq_from_path(x[pattern_str], c, log_max_cnt), axis=1))
+def cal_freq_from_df(df:pd.DataFrame, cal_freq:CalFreq):
+    return df.assign(pattern_freq = df.apply(lambda x: cal_freq.cal_freq_from_path(x[pattern_str]), axis=1))
 
 
 def cal_score_from_df(df:pd.DataFrame):
@@ -445,6 +630,9 @@ def cal_score_from_df(df:pd.DataFrame):
 
 
 def get_entity_page(ent:str):
+    '''
+    Locate the wikipedia page of an entity in the dump
+    '''
     lines = []
     for f in save_title_files:
         found = False
@@ -472,6 +660,9 @@ def find_triangles(graph:nx.Graph, node:str):
 
 
 def find_path_between_pair(graph:nx.Graph, first_node:str, second_node:str, hop_num:int=1):
+    '''
+    Find all the paths connecting two entities in the graph.
+    '''
     first_neighbors = set(graph.neighbors(first_node))
     first_neighbors.remove(second_node)
     second_neighbors = set(graph.neighbors(second_node))
@@ -504,17 +695,37 @@ def find_all_triangles(graph:nx.Graph):
     return set(frozenset([n,nbr,nbr2]) for n in tqdm.tqdm(graph) for nbr, nbr2 in itertools.combinations(graph[n],2) if nbr in graph[nbr2])
 
 
-def generate_sample(target_graph:nx.Graph, source_graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, min_path_num:int=5, feature:str='score', replaceable=False):
+def generate_sample(target_graph:nx.Graph, source_graph:nx.Graph, ent1:str, ent2:str, max_hop_num:int=2, max_path_num:int=5, feature:str='score', replaceable=False):
+    '''
+    Generate dataset sample for a pair of entities
+
+    ## Parameters
+        target_graph: nx.Graph
+            This graph provides target sentences
+        source_graph: nx.Graph
+            This graph provides input sentences
+        max_hop_num: int
+            The maximum number of hops in the path, 1 means 2 hop path, 2 means 3 hop path
+        max_path_num: int
+            The maximum number of paths to be collected
+        feature: str or None
+            The feature to sort the paths. If None, the random paths will be selected. 
+            The feature could be "score", "significant" and "explicit"
+        replaceable: bool, default False
+            Whether the input sentence in the path can be replaced with another sentence if it equals the target sentence.
+            If not replaceable, when this happens, the path will be abandoned
+    '''
     target = target_graph.get_edge_data(ent1, ent2)
     if not target:
         return None
     hop_num = 1
     triples = []
-    target_note = target['data'][0]['note']
+    target_note = target['data'][0]['note']     # Get the target sentence note
     paths = []
     while hop_num<=max_hop_num:
         temp_paths = find_path_between_pair(source_graph, ent1, ent2, hop_num=hop_num)
         path_candidates = []
+        # Collect data for each path
         for path in temp_paths:
             temp_sum = 0
             path_abandon = False
@@ -524,6 +735,7 @@ def generate_sample(target_graph:nx.Graph, source_graph:nx.Graph, ent1:str, ent2
                 sim = data['sim']
                 data = data['data']
                 item:dict = deepcopy(data[0])
+                # Handle the edge if the sentence equals the target
                 if item['note'] == target_note:
                     if not replaceable or len(data) <= 1:
                         path_abandon = True
@@ -549,14 +761,14 @@ def generate_sample(target_graph:nx.Graph, source_graph:nx.Graph, ent1:str, ent2
             
         hop_num += 1
         
-    if len(paths) < min_path_num:
+    if len(paths) < max_path_num:
         return None
     
     if not feature:
         random.seed(0)
         random.shuffle(paths)
         
-    for path in paths[:min_path_num]:
+    for path in paths[:max_path_num]:
         for tri in path:
             tri.update({'pid' : len(triples)})
         triples.append(path)
@@ -670,78 +882,6 @@ def expand_dependency_info_from_tree(doc, path:np.ndarray):
             if path[child.i] == 0:
                 path[child.i] = 1
                 modifiers.append(child.i)
-
-
-def get_path(doc, kw1_steps:List[int], kw2_steps:List[int]):
-    path_tokens = []
-    for step in kw1_steps:
-        path_tokens.append('i_' + doc[step].dep_)
-    kw2_steps.reverse()
-    for step in kw2_steps:
-        path_tokens.append(doc[step].dep_)
-    return ' '.join(path_tokens)
-
-
-def find_dependency_info_from_tree(doc, kw1, kw2):
-    # Find roots of the spans
-    idx1 = find_root_in_span(kw1)
-    idx2 = find_root_in_span(kw2)
-    kw1_front, kw1_end = kw1[0].i, kw1[-1].i
-    kw2_front, kw2_end = kw2[0].i, kw2[-1].i
-    branch = np.zeros(len(doc))
-    kw1_steps = []
-    kw2_steps = []
-    path_found = False
-    
-    i = idx1
-    while branch[i] == 0:
-        branch[i] = 1
-        kw1_steps.append(i)
-        i = doc[i].head.i
-        if i >= kw2_front and i <= kw2_end:
-            # kw2 is above kw1
-            path_found = True
-            break
-        
-    if not path_found:
-        i = idx2
-        while branch[i] != 1:
-            branch[i] = 2
-            kw2_steps.append(i)
-            if i == doc[i].head.i:
-                return [], [], np.array([])
-            
-            i = doc[i].head.i
-            if i >= kw1_front and i <= kw1_end:
-                # kw1 is above kw2
-                branch[branch != 2] = 0
-                kw1_steps = []
-                path_found = True
-                break
-    
-    if not path_found:
-        # kw1 and kw2 are on two sides, i is their joint
-        break_point = kw1_steps.index(i)
-        branch[kw1_steps[break_point+1 : ]] = 0
-        kw1_steps = kw1_steps[:break_point] # Note that we remain the joint node in the branch, but we don't include joint point in kw1_steps and kw2_steps
-                                            # this is because the joint node is part of the path and we need the modification information from it, 
-                                            # but we don't care about its dependency
-    branch[branch != 0] = 1
-    branch[kw1_front : kw1_end+1] = 1
-    branch[kw2_front : kw2_end+1] = 1
-    return kw1_steps, kw2_steps, branch
-
-
-def collect_sub_dependency_path(doc, branch:np.ndarray):
-    paths = []
-    dep_path:list = (np.arange(*branch.shape)[branch!=0]).tolist()
-    for token_id in dep_path:
-        temp_paths = [(token_id, child.dep_, child.i) for child in doc[token_id].children if branch[child.i] == 0]
-        while len(temp_paths) > 0:
-            item  = temp_paths.pop()
-            paths.append(item)
-            temp_paths.extend([(item[0], item[1] + ' ' + child.dep_, child.i) for child in doc[item[2]].children if branch[child.i] == 0])
-    return paths
 
 
 def informativeness_demo(sent:str, kw1:str, kw2:str, fp:FeatureProcess):
@@ -955,7 +1095,7 @@ if __name__ == '__main__':
             with open(save_pair_files[file_idx]) as f_in:
                 pairs_list.extend(f_in.read().split('\n'))
         
-        c = Counter(process_list(sents, pairs_list, batched_collect_sub_dep_path))
+        c = Counter(process_list(sents, pairs_list, batched_collect_subpath_pattern))
         my_write_pickle(sub_path_pattern_count_file, c)
         
         
@@ -1178,11 +1318,11 @@ if __name__ == '__main__':
         fail_num = 0
         for edge_idx, edge in enumerate(tqdm.tqdm(target_edges)):
             edge_count += 1
-            sample = generate_sample(target_graph, source_sent_g, edge[0], edge[1], min_path_num=1, feature=feature)
+            sample = generate_sample(target_graph, source_sent_g, edge[0], edge[1], max_path_num=1, feature=feature)
             if sample:
                 samples.append(sample)
             else:
-                sample = generate_sample(target_graph, target_graph, edge[0], edge[1], min_path_num=1)
+                sample = generate_sample(target_graph, target_graph, edge[0], edge[1], max_path_num=1)
                 if sample:
                     fail_num += 1
                     samples.append(sample)
